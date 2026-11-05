@@ -344,7 +344,7 @@ async function queueAgent(
   step: Extract<Step, { type: 'agent' }>,
 ) {
   const gate = await allowance.consumeResidentTask(row.ownerId)
-  if (!gate.ok) throw new StepError('no model account connected — the Doop Agent has nothing to run on')
+  if (!gate.ok) throw new StepError(`no model account connected — the ${brandAgentName()} has nothing to run on`)
   let committed = false
   try {
     const sourceBrief = state.sources.length

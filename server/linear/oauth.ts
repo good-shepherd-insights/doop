@@ -1,4 +1,5 @@
 import { env } from '../env.ts'
+import { brandName } from '../branding.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { and, eq, gt, lt } from 'drizzle-orm'
 import { z } from 'zod'
@@ -116,7 +117,10 @@ export async function finishInstall(userId: string, state: string, code: string)
     })
     .returning()
   if (!rows.length)
-    throw new LinearError('This Linear workspace already has a Doop installer. Ask them to disconnect it first.', 409)
+    throw new LinearError(
+      `This Linear workspace already has a ${brandName()} installer. Ask them to disconnect it first.`,
+      409,
+    )
 }
 
 export async function getInstallation(userId: string) {

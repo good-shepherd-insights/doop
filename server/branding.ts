@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { DEFAULT_BRANDING } from '../shared/branding-defaults.ts'
 
 /**
  * Whitelabel brand, resolved from environment variables once per read so
@@ -45,8 +46,8 @@ export const brandLogoUrlDark = () => env.BRAND_LOGO_URL_DARK ?? env.BRAND_LOGO_
 export const brandMarkUrl = () => env.BRAND_MARK_URL
 export const brandMarkUrlDark = () => env.BRAND_MARK_URL_DARK ?? env.BRAND_MARK_URL
 
-export const brandWebsiteUrl = () => env.BRAND_WEBSITE_URL ?? 'https://doop.design'
-export const brandDownloadUrl = () => env.BRAND_DOWNLOAD_URL ?? 'https://doop.design/download'
+export const brandWebsiteUrl = () => env.BRAND_WEBSITE_URL ?? DEFAULT_BRANDING.websiteUrl
+export const brandDownloadUrl = () => env.BRAND_DOWNLOAD_URL ?? DEFAULT_BRANDING.downloadUrl
 
 export const emailPasswordAuth = () => env.EMAIL_PASSWORD_AUTH
 

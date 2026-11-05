@@ -3,6 +3,7 @@ import type { ReporterOptions } from 'envalid'
 import { createHash } from 'node:crypto'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENROUTER_MODEL } from '../shared/modelMenu.ts'
 import { FALLBACK_LOCALE, LOCALES } from '../shared/locales.ts'
+import { DEFAULT_BRANDING } from '../shared/branding-defaults.ts'
 
 /**
  * Every environment variable the server reads, declared once with its type
@@ -154,11 +155,13 @@ const schema = {
   /* ------------------------------------------------------- branding */
   /* Whitelabel surface. Every default is Doop's own brand, so an unset
      variable means today's behaviour; a self-host sets the ones it wants. */
-  APP_NAME: str({ default: 'Doop', desc: 'Display name across the UI, page title, emails and MCP metadata' }),
-  BRAND_TAGLINE: str({ default: 'designed by Agents & Humans', desc: 'Slogan after the name in the page title' }),
+  APP_NAME: str({
+    default: DEFAULT_BRANDING.name,
+    desc: 'Display name across the UI, page title, emails and MCP metadata',
+  }),
+  BRAND_TAGLINE: str({ default: DEFAULT_BRANDING.tagline, desc: 'Slogan after the name in the page title' }),
   BRAND_DESCRIPTION: str({
-    default:
-      'A multiplayer design canvas where people and AI agents create side by side. Connect any MCP agent and watch it design live.',
+    default: DEFAULT_BRANDING.description,
     desc: 'Meta/OG description of the product',
   }),
   BRAND_COLOR: hexColor({

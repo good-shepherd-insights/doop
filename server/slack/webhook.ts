@@ -1,4 +1,5 @@
 import { env } from '../env.ts'
+import { brandName } from '../branding.ts'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import express from 'express'
 import { z } from 'zod'
@@ -92,7 +93,7 @@ export function slackWebhookRouter() {
           text: parsed.data.text,
           responseUrl: parsed.data.response_url,
         })
-        res.json({ response_type: 'in_channel', text: 'Doop is on it — designing from your brief.' })
+        res.json({ response_type: 'in_channel', text: `${brandName()} is on it — designing from your brief.` })
         wakeSlack()
         return
       }

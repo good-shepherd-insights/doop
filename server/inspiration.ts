@@ -13,6 +13,7 @@
  */
 
 import { env } from './env.ts'
+import { brandName } from './branding.ts'
 
 const OPL_API = 'https://api.onepagelove.com/v1'
 const FETCH_TIMEOUT_MS = 15_000
@@ -68,8 +69,8 @@ export function inspirationSearchEnabled(): boolean {
   return Boolean(env.ONEPAGELOVE_API_KEY)
 }
 
-export const INSPIRATION_UNAVAILABLE_NOTE =
-  'Inspiration search is not configured on this Doop instance. Write the brief from the canvas context and the design-quality principles, and say in the brief that no exemplar was available.'
+export const INSPIRATION_UNAVAILABLE_NOTE = () =>
+  `Inspiration search is not configured on this ${brandName()} instance. Write the brief from the canvas context and the design-quality principles, and say in the brief that no exemplar was available.`
 
 const cache = new Map<string, { at: number; results: InspirationResult[] }>()
 const inflight = new Map<string, Promise<InspirationResult[]>>()

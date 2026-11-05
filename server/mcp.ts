@@ -1,5 +1,5 @@
 import { env } from './env.ts'
-import { brandName, brandSlug } from './branding.ts'
+import { brandAgentName, brandName, brandSlug } from './branding.ts'
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
@@ -99,7 +99,7 @@ ${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arri
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
 - Design tokens: canvases can carry typed design tokens (colour, spacing, radius, type scale — CSS custom properties), each with a value per theme (light, dark, …) where it differs. get_canvas lists them; use one by writing var(--name) in CSS, never the literal, so a token change restyles every frame; switch a frame's theme with data-doop-theme="dark" on its <html>. create_tokens adds them when a brief names a palette or scale; set_tokens changes, renames or deletes; set_token_themes declares the themes; get_tokens exports them as JSON, CSS or a Tailwind @theme block.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.
-- Problems with Doop itself: when a Doop tool errors, misbehaves or lacks something you need, or the guide leaves you guessing, call report_issue with what you tried and what happened, then carry on. Ideas for making Doop better for agents, or something that worked well, go to share_feedback. Both reach the Doop team, not the humans on the canvas.`
+- Problems with ${brandName()} itself: when a ${brandName()} tool errors, misbehaves or lacks something you need, or the guide leaves you guessing, call report_issue with what you tried and what happened, then carry on. Ideas for making ${brandName()} better for agents, or something that worked well, go to share_feedback. Both reach the ${brandName()} team, not the humans on the canvas.`
 
 function extensionGuideLines(): string {
   const lines = extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
@@ -147,7 +147,7 @@ function withEscapeNote<T extends { content: { type: 'text' | 'image'; [k: strin
   result: T,
   sent: string,
 ): T {
-  if (looksEscapedHtml(sent)) result.content.push({ type: 'text' as const, text: ESCAPED_HTML_NOTE })
+  if (looksEscapedHtml(sent)) result.content.push({ type: 'text' as const, text: ESCAPED_HTML_NOTE() })
   return result
 }
 
@@ -381,9 +381,8 @@ export function buildMcpServer(
   server.registerTool(
     'get_guide',
     {
-      title: 'Read the Doop agent guide',
-      description:
-        'Read the Doop agent guide: mandatory review checkpoints, the streaming workflow, frame sizing, design-quality doctrine, and multiplayer etiquette. Call with topic "doop-instructions" ONCE before using other Doop tools; call again if a long conversation may have compressed earlier context.',
+      title: `Read the ${brandAgentName()} agent guide`,
+      description: `Read the ${brandAgentName()} agent guide: mandatory review checkpoints, the streaming workflow, frame sizing, design-quality doctrine, and multiplayer etiquette. Call with topic "doop-instructions" ONCE before using other ${brandName()} tools; call again if a long conversation may have compressed earlier context.`,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         topic: z.enum(GUIDE_TOPICS).describe('Guide topic to load'),
@@ -409,7 +408,7 @@ export function buildMcpServer(
       },
     },
     async ({ query, count, canvas_id, agent_name }) => {
-      if (!inspirationSearchEnabled()) return text({ ok: true, results: [], note: INSPIRATION_UNAVAILABLE_NOTE })
+      if (!inspirationSearchEnabled()) return text({ ok: true, results: [], note: INSPIRATION_UNAVAILABLE_NOTE() })
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
       const hits = (searchHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
@@ -472,15 +471,14 @@ export function buildMcpServer(
     'get_profile',
     {
       title: 'Get the connected account',
-      description:
-        'Return the Doop account this connection is signed in as (stable id and display name). Read-only; use it to confirm whose canvases you are working on.',
+      description: `Return the ${brandName()} account this connection is signed in as (stable id and display name). Read-only; use it to confirm whose canvases you are working on.`,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       _meta: { 'openai/profile': true },
       inputSchema: {},
       outputSchema: { id: z.string(), name: z.string() },
     },
     async () => {
-      if (!ownerId) return err('this connection is not signed in to a Doop account')
+      if (!ownerId) return err(`this connection is not signed in to a ${brandName()} account`)
       const profile = { id: ownerId, name: owner ?? '' }
       return { content: [{ type: 'text' as const, text: JSON.stringify(profile) }], structuredContent: profile }
     },
@@ -919,8 +917,7 @@ export function buildMcpServer(
     'save_decision',
     {
       title: 'Save a design decision',
-      description:
-        'Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). Doop\'s UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas\'s Memory; recurring preferences become suggested style rules. Record design taste only — not one-off content edits like typo fixes or copy changes.',
+      description: `Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). ${brandName()}'s UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas's Memory; recurring preferences become suggested style rules. Record design taste only — not one-off content edits like typo fixes or copy changes.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1014,8 +1011,7 @@ export function buildMcpServer(
     'reply_to_comment',
     {
       title: 'Reply to a comment',
-      description:
-        'Reply inside an element-comment thread on a canvas. The reply inherits the root comment’s element anchor, so an @mention in it gives the resident agent the same anchor the conversation is about. Writing does not resolve the thread — read the request with get_comments, make the change, then close it with resolve_comment. If the text @mentions a resident role (e.g. "@Doop"), it counts as a new resident task against the account’s meter, exactly like a comment left in the browser.',
+      description: `Reply inside an element-comment thread on a canvas. The reply inherits the root comment’s element anchor, so an @mention in it gives the resident agent the same anchor the conversation is about. Writing does not resolve the thread — read the request with get_comments, make the change, then close it with resolve_comment. If the text @mentions a resident role (e.g. "@${brandAgentName()}"), it counts as a new resident task against the account’s meter, exactly like a comment left in the browser.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1146,10 +1142,14 @@ export function buildMcpServer(
       userId: ownerId,
     })
     if (!saved.ok) return err(saved.error)
-    return text({ ok: true, id: saved.id, note: 'Thanks — the Doop team reads these. Carry on with your task.' })
+    return text({
+      ok: true,
+      id: saved.id,
+      note: `Thanks — the ${brandName()} team reads these. Carry on with your task.`,
+    })
   }
   const teamMessageFields = {
-    tool: z.string().max(80).optional().describe('The Doop tool involved, if any (e.g. "edit_frame_html").'),
+    tool: z.string().max(80).optional().describe(`The ${brandName()} tool involved, if any (e.g. "edit_frame_html").`),
     canvas_id: z.string().optional().describe('The canvas you were working on, if any.'),
     agent_name: agentName.optional(),
   }
@@ -1157,15 +1157,14 @@ export function buildMcpServer(
   server.registerTool(
     'report_issue',
     {
-      title: 'Report a problem with Doop',
-      description:
-        "Tell the Doop team where Doop itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with Doop — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets.",
+      title: `Report a problem with ${brandName()}`,
+      description: `Tell the ${brandName()} team where ${brandName()} itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with ${brandName()} — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         category: z
           .enum(AGENT_ISSUE_CATEGORIES)
           .describe(
-            'bug: a tool misbehaved · tool_error: a tool returned an error you could not get past · confusing: the guide or a description was unclear · missing_capability: you needed something Doop cannot do · other',
+            `bug: a tool misbehaved · tool_error: a tool returned an error you could not get past · confusing: the guide or a description was unclear · missing_capability: you needed something ${brandName()} cannot do · other`,
           ),
         message: z
           .string()
@@ -1181,15 +1180,14 @@ export function buildMcpServer(
   server.registerTool(
     'share_feedback',
     {
-      title: 'Share an idea or feedback about Doop',
-      description:
-        "Tell the Doop team how Doop could work better for agents like you: a tool you wish existed, a parameter or result field that would have saved you calls, a workflow that felt clumsy, or something that worked especially well and should stay. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be concrete: what you were doing and what would have helped. Never include secrets.",
+      title: `Share an idea or feedback about ${brandName()}`,
+      description: `Tell the ${brandName()} team how ${brandName()} could work better for agents like you: a tool you wish existed, a parameter or result field that would have saved you calls, a workflow that felt clumsy, or something that worked especially well and should stay. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be concrete: what you were doing and what would have helped. Never include secrets.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         category: z
           .enum(AGENT_IDEA_CATEGORIES)
           .describe(
-            'idea: something new Doop could offer · improvement: a change to something that exists · praise: something that worked well · other',
+            `idea: something new ${brandName()} could offer · improvement: a change to something that exists · praise: something that worked well · other`,
           ),
         message: z
           .string()

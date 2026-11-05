@@ -1,5 +1,5 @@
 import { PDFDocument } from 'pdf-lib'
-import { brandSlug } from './branding.ts'
+import { brandName, brandSlug } from './branding.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
@@ -133,8 +133,8 @@ export async function renderFramesPdf(frames: readonly Frame[]): Promise<Buffer>
     const [copied] = await merged.copyPages(source, [0])
     if (copied) merged.addPage(copied)
   }
-  merged.setProducer('Doop')
-  merged.setCreator('Doop')
+  merged.setProducer(brandName())
+  merged.setCreator(brandName())
   return Buffer.from(await merged.save())
 }
 

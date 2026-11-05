@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { brandName } from './branding.ts'
 import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
@@ -728,20 +729,24 @@ export function startCallbackCatcher(): Promise<boolean> {
           400,
           error ? 'Connection refused' : 'Nothing to do here',
           error
-            ? `OpenAI reported: ${url.searchParams.get('error_description') || error}. You can close this tab and try again in Doop.`
+            ? `OpenAI reported: ${url.searchParams.get('error_description') || error}. You can close this tab and try again in ${brandName()}.`
             : 'This page only handles the ChatGPT sign-in redirect.',
         )
       }
       const userId = userIdForState(state)
-      if (!userId) return finish(400, 'That sign-in expired', 'Start the connection again from Doop.')
+      if (!userId) return finish(400, 'That sign-in expired', `Start the connection again from ${brandName()}.`)
       completeChatgptAuth(userId, url.toString()).then(
         () => {
-          finish(200, 'ChatGPT connected', 'You can close this tab — Doop already knows. Back to designing.')
+          finish(200, 'ChatGPT connected', `You can close this tab — ${brandName()} already knows. Back to designing.`)
           /* one flow per listener: the code is spent and the port goes back */
           stopCatcher()
         },
         (err: unknown) => {
-          finish(400, "That didn't work", err instanceof Error ? err.message : 'Try connecting again from Doop.')
+          finish(
+            400,
+            "That didn't work",
+            err instanceof Error ? err.message : `Try connecting again from ${brandName()}.`,
+          )
         },
       )
     })

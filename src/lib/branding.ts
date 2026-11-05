@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { addRoleAlias, DEFAULT_ROLE_ID } from '../../shared/agents'
+import { DEFAULT_BRANDING } from '../../shared/branding-defaults'
 
 /**
  * The instance's brand, read once from GET /api/branding (server/branding.ts)
@@ -30,19 +31,7 @@ export type Branding = {
   emailPasswordAuth: boolean
 }
 
-const FALLBACK: Branding = {
-  name: 'Doop',
-  tagline: 'designed by Agents & Humans',
-  description: '',
-  agentName: 'Doop',
-  logoUrl: null,
-  logoUrlDark: null,
-  markUrl: null,
-  markUrlDark: null,
-  websiteUrl: 'https://doop.design',
-  downloadUrl: 'https://doop.design/download',
-  emailPasswordAuth: true,
-}
+const FALLBACK: Branding = { ...DEFAULT_BRANDING }
 
 let current: Branding = FALLBACK
 const listeners = new Set<() => void>()

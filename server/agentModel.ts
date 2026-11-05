@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { brandAgentName } from './branding.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
@@ -73,7 +74,7 @@ let anthropic: Anthropic | null = null
 function anthropicTier(): AgentModel | null {
   if (!env.ANTHROPIC_API_KEY) {
     warnOnce(
-      '[doop-agent] ANTHROPIC_API_KEY not set — the free Doop Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See README → "The Doop Agent".',
+      `[doop-agent] ANTHROPIC_API_KEY not set — the free ${brandAgentName()} tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See README → "The Doop Agent".`,
     )
     return null
   }
@@ -81,7 +82,7 @@ function anthropicTier(): AgentModel | null {
   const client = anthropic
   return {
     provider: 'anthropic',
-    label: `Doop (${ANTHROPIC_MODEL})`,
+    label: `${brandAgentName()} (${ANTHROPIC_MODEL})`,
     run: (req) => runAnthropicTurn(client, ANTHROPIC_MODEL, req),
   }
 }
@@ -136,14 +137,14 @@ function azureTier(): AgentModel | null {
   const apiKey = env.AZURE_OPENAI_API_KEY
   if (!endpoint || !deployment || !apiKey) {
     warnOnce(
-      '[doop-agent] DOOP_AGENT_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY — the free Doop Agent tier is off until all three are set.',
+      `[doop-agent] DOOP_AGENT_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY — the free ${brandAgentName()} tier is off until all three are set.`,
     )
     return null
   }
   const config = { endpoint, deployment, apiKey }
   return {
     provider: 'azure',
-    label: `Doop (${deployment})`,
+    label: `${brandAgentName()} (${deployment})`,
     async run(req) {
       try {
         return await runAzureTurn(config, {

@@ -4,6 +4,7 @@
  */
 
 import { AGENT_ROLES } from '../shared/agents.ts'
+import { brandAgentName, brandName } from './branding.ts'
 
 export const GUIDE_TOPICS = ['doop-instructions'] as const
 
@@ -30,7 +31,7 @@ export const DESIGN_QUALITY = `- Commit to ONE clear aesthetic direction per fra
 - White space is a feature. Vary spacing deliberately — tight inside groups, generous
   between them.
 - Realistic content everywhere. No lorem ipsum, no "Your text here". When placeholder
-  content needs a design tool as an example, it is Doop — never a competitor.
+  content needs a design tool as an example, it is ${brandName()} — never a competitor.
 - Logos are real, never placeholders. Every slot that shows a company mark — "trusted by"
   walls, integration and "works with" rows, payment methods, press bars, app-store
   badges, the company beside a testimonial — gets that company's actual logo fetched
@@ -93,18 +94,18 @@ only run in the player):
   and flags targets that do not exist — call it after wiring and fix what it flags. The player
   lives at /c/<canvasId>/proto (append ?frame=<id> to open on a specific screen).`
 
-export const DOOP_GUIDE = `# Doop Agent Guide
+export const DOOP_GUIDE = `# ${brandAgentName()} Guide
 
 ## The room you're in
 
-Doop is a live multiplayer canvas. Humans and other agents may be present RIGHT NOW:
+${brandName()} is a live multiplayer canvas. Humans and other agents may be present RIGHT NOW:
 your edits render for them the moment you make them, your presence appears under your
 agent_name, and every action lands in a visible activity feed. Work like a considerate
 colleague, not a batch job.
 
-## The Doop Agent
+## The ${brandAgentName()}
 
-Every canvas has a built-in Doop Agent: a set of roles that live in the server and pick
+Every canvas has a built-in ${brandAgentName()}: a set of roles that live in the server and pick
 work up on their own. Humans queue board cards addressed to them, and can route a card
 through several in order — design, then copy, then brand, then accessibility:
 
@@ -225,7 +226,7 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - A frame renders a complete HTML document in a sandboxed iframe. Inline <style> and
   <script> work; Google Fonts via <link> work.
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
-  family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
+  family in CSS (font-family: "Family", sans-serif) and nothing more: ${brandName()} adds the @font-face
   rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
 - Always reset: * { margin: 0; box-sizing: border-box; } and design to the exact frame size.
 - Size frames to their content: mobile screen 390×844, desktop page 1280×800, card or
@@ -241,7 +242,7 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 
 Frames whose HTML carries a "doop-github-screen" marker meta were imported from a
 connected GitHub repository: repo HTML as-is, or a screen that exists in that repo only
-as code (a Next.js page, a Storybook story, a component) sketched by Doop from its
+as code (a Next.js page, a Storybook story, a component) sketched by ${brandName()} from its
 source. The marker records the repo, the route and the source file path.
 
 If you have that repository available (checked out locally, or reachable through your
@@ -363,7 +364,7 @@ and is relevant to your task, call get_reference for its full HTML and match its
 palette, typography, spacing and overall look — it is the ground truth for the
 canvas's style, alongside the style guides.
 
-Memory also learns from feedback. Feedback given inside Doop is captured
+Memory also learns from feedback. Feedback given inside ${brandName()} is captured
 automatically once addressed — but feedback your human gives YOU in
 conversation is invisible to the canvas unless you report it. After you
 address design feedback from your own chat ("rounder corners", "more white
@@ -412,7 +413,7 @@ ${DESIGN_QUALITY}
   invents content is wrong even when it looks good. Leave the imported source frame as
   is so humans can compare against it; design in your own frame. Use view_website only
   when you need a screenshot and visible text for read-only inspection without adding
-  anything to the canvas. If Doop cannot capture the site, do not retry it
+  anything to the canvas. If ${brandName()} cannot capture the site, do not retry it
   through view_website. Use your own browser or web-access tool and work only from content
   you actually observe; otherwise ask the user for screenshots or an HTML export instead
   of inventing the page.

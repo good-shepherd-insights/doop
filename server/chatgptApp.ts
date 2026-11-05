@@ -13,6 +13,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { env } from './env.ts'
+import { brandName } from './branding.ts'
 import type { Frame } from '../shared/types.ts'
 
 /* Hosts cache the component by URI, so a change to the markup or script
@@ -76,8 +77,7 @@ export function previewToolMeta(invoking: string, invoked: string): Record<strin
   }
 }
 
-const WIDGET_DESCRIPTION =
-  'Shows a rendered preview of the Doop frames this tool touched, with a button that opens the canvas.'
+const WIDGET_DESCRIPTION = `Shows a rendered preview of the ${brandName()} frames this tool touched, with a button that opens the canvas.`
 
 /** Registers the component resource. One per server instance; the host
  *  fetches it once per URI and caches it, so the URI doubles as a version. */
@@ -89,7 +89,7 @@ function registerPreviewResource(server: McpServer, uri: string): void {
   server.registerResource(
     `doop-frame-preview-${uri.replace(/\W+/g, '-')}`,
     uri,
-    { title: 'Doop frame preview', description: WIDGET_DESCRIPTION, mimeType: PREVIEW_MIME },
+    { title: `${brandName()} frame preview`, description: WIDGET_DESCRIPTION, mimeType: PREVIEW_MIME },
     async () => ({
       contents: [
         {
@@ -227,8 +227,8 @@ export function framePreviewHtml(): string {
     if (!data || !data.canvas) { root.innerHTML = '<p class="empty">Nothing to preview yet.</p>'; reportSize(); return; }
     var frames = Array.isArray(data.frames) ? data.frames : [];
     var html = '<div class="head"><div><div class="title">' + esc(data.canvas.name || 'Canvas') + '</div>' +
-      '<div class="sub">' + (frames.length === 1 ? '1 frame' : frames.length + ' frames') + ' · Doop</div></div>' +
-      '<button class="open" type="button" data-href="' + esc(data.canvas.url) + '">Open in Doop</button></div>';
+      '<div class="sub">' + (frames.length === 1 ? '1 frame' : frames.length + ' frames') + ' · ${brandName()}</div></div>' +
+      '<button class="open" type="button" data-href="' + esc(data.canvas.url) + '">Open in ${brandName()}</button></div>';
     if (!frames.length) html += '<p class="empty">This canvas has no frames yet.</p>';
     else {
       var shown = frames.slice(0, MAX_SHOWN);
@@ -244,7 +244,7 @@ export function framePreviewHtml(): string {
       }
       if (frames.length > shown.length) {
         var rest = frames.length - shown.length;
-        html += '<a class="card more" href="' + esc(data.canvas.url) + '" data-href="' + esc(data.canvas.url) + '">+' + rest + ' more frame' + (rest === 1 ? '' : 's') + '<span>Open in Doop</span></a>';
+        html += '<a class="card more" href="' + esc(data.canvas.url) + '" data-href="' + esc(data.canvas.url) + '">+' + rest + ' more frame' + (rest === 1 ? '' : 's') + '<span>Open in ${brandName()}</span></a>';
       }
       html += '</div>';
     }
@@ -294,7 +294,7 @@ export function framePreviewHtml(): string {
     if (m.method === 'ui/notifications/tool-result' && m.params && m.params.structuredContent) apply(m.params.structuredContent, 'tool-result');
     if (m.method === 'ui/notifications/host-context-changed' && m.params && m.params.theme) setTheme(m.params.theme);
   });
-  request('ui/initialize', { appInfo: { name: 'Doop frame preview', version: '1' }, appCapabilities: {}, protocolVersion: '2026-01-26' })
+  request('ui/initialize', { appInfo: { name: '${brandName()} frame preview', version: '1' }, appCapabilities: {}, protocolVersion: '2026-01-26' })
     .then(function (result) {
       bridge.connected = true;
       notify('ui/notifications/initialized');

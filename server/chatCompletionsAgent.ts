@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { brandName } from './branding.ts'
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
@@ -56,7 +57,7 @@ export function openrouterConfig(apiKey: string, model: string, vision: boolean)
   return {
     url: OPENROUTER_URL,
     /* the attribution headers are how OpenRouter credits the calling app */
-    headers: { Authorization: `Bearer ${apiKey}`, 'HTTP-Referer': APP_ORIGIN, 'X-Title': 'Doop' },
+    headers: { Authorization: `Bearer ${apiKey}`, 'HTTP-Referer': APP_ORIGIN, 'X-Title': brandName() },
     model,
     label: 'OpenRouter',
     vision,

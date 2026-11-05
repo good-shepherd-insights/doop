@@ -1,4 +1,5 @@
 import { env } from '../env.ts'
+import { brandName } from '../branding.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { and, eq, gt, lt } from 'drizzle-orm'
 import { z } from 'zod'
@@ -65,7 +66,7 @@ async function exchange(code: string) {
   }
   const result = tokenSchema.safeParse(await response.json().catch(() => null))
   if (!response.ok || !result.success)
-    throw new SlackError('Slack authorization expired or was rejected. Install Doop again.', 409)
+    throw new SlackError(`Slack authorization expired or was rejected. Install ${brandName()} again.`, 409)
   return result.data
 }
 
@@ -105,7 +106,10 @@ export async function finishInstall(userId: string, state: string, code: string)
     })
     .returning()
   if (!rows.length)
-    throw new SlackError('This Slack workspace already has a Doop installer. Ask them to disconnect it first.', 409)
+    throw new SlackError(
+      `This Slack workspace already has a ${brandName()} installer. Ask them to disconnect it first.`,
+      409,
+    )
 }
 
 export async function getInstallation(userId: string) {

@@ -1,4 +1,5 @@
 import express from 'express'
+import { brandName } from '../branding.ts'
 import type { ServerExtension } from '../extensions.ts'
 import { agentEnabled, finishInstall, getInstallation, startInstall } from './oauth.ts'
 import { disconnectAgent, startSlackWorker } from './jobs.ts'
@@ -30,7 +31,7 @@ export const slackExtension: ServerExtension = {
         await finishInstall(userId, query.state ?? '', query.code ?? '')
         return '/integrations?slack=connected'
       } catch (error) {
-        const message = error instanceof SlackError ? error.message : 'Could not install Doop in Slack.'
+        const message = error instanceof SlackError ? error.message : `Could not install ${brandName()} in Slack.`
         return `/integrations?slackError=${encodeURIComponent(message)}`
       }
     },
