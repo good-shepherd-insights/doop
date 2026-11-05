@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { DEFAULT_ROLE_ID, roleName } from '../../shared/agents'
 import type { AgentTask } from '../../shared/types'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
@@ -27,6 +28,7 @@ import { CommentsPanel } from './CommentsPanel'
 import { PromptBar } from './PromptBar'
 import { taskFrameId } from '../lib/taskFrame'
 import { useOpenThreadCount } from '../lib/comments'
+import { useBrand } from '@/lib/branding'
 import { useT } from '@/lib/i18n'
 
 const emptyNote = 'px-4 py-6 text-center text-[12px] text-ink-faint'
@@ -231,9 +233,12 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     s.requestFlyTo(frameId)
   }
   const t = useT()
+  const brand = useBrand()
   const running = !task.endedAt && !task.failedAt
   const failed = !!task.failedAt
-  const reason = task.failureReason ?? t('panels.activityTaskUnfinished')
+  const storedReason = task.failureReason ?? t('panels.activityTaskUnfinished')
+  const reason = storedReason.replace(/^Doop could not finish this:/, `${brand.agentName} could not finish this:`)
+  const actorName = task.agentName === roleName(DEFAULT_ROLE_ID) ? brand.agentName : task.agentName
   /* a job's status already is its reason; a card's status is its brief */
   const separateReason = failed && reason !== task.status
   return (
@@ -258,7 +263,7 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
         <span className="grid size-4 flex-none place-items-center">
           <AgentIcon name={task.agentName} size={14} />
         </span>
-        <b className="truncate font-medium text-ink">{task.agentName}</b>
+        <b className="truncate font-medium text-ink">{actorName}</b>
         {task.owner && (
           <em className="truncate not-italic text-ink-faint">{t('panels.activityFor', { name: task.owner })}</em>
         )}
@@ -338,24 +343,29 @@ function TaskMark({ task }: { task: AgentTask }) {
 function ActivityList() {
   const activity = useStore((s) => s.activity)
   const t = useT()
+  const brand = useBrand()
   return (
     <PanelBody className="py-2">
       {activity.length === 0 && <div className={emptyNote}>{t('panels.activityEmpty')}</div>}
-      {activity.map((a) => (
-        <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-[12px] leading-[1.45]">
-          <Dot className="mt-[5px]" style={{ background: a.actorColor }} />
-          <div className="min-w-0">
-            <div>
-              <span className="font-medium">
-                {a.actorName}
-                <span className="ml-[5px] text-[11px] font-normal text-ink-faint">{a.actorKind}</span>
-              </span>{' '}
-              <span className="text-ink-soft">{a.message}</span>
+      {activity.map((a) => {
+        const actorName =
+          a.actorKind === 'agent' && a.actorName === roleName(DEFAULT_ROLE_ID) ? brand.agentName : a.actorName
+        return (
+          <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-[12px] leading-[1.45]">
+            <Dot className="mt-[5px]" style={{ background: a.actorColor }} />
+            <div className="min-w-0">
+              <div>
+                <span className="font-medium">
+                  {actorName}
+                  <span className="ml-[5px] text-[11px] font-normal text-ink-faint">{a.actorKind}</span>
+                </span>{' '}
+                <span className="text-ink-soft">{a.message}</span>
+              </div>
+              <div className="mt-0.5 text-[11px] text-ink-faint">{timeAgo(a.at)}</div>
             </div>
-            <div className="mt-0.5 text-[11px] text-ink-faint">{timeAgo(a.at)}</div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </PanelBody>
   )
 }

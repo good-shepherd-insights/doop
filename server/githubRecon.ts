@@ -1,3 +1,4 @@
+import { brandAgentName } from './branding.ts'
 import { env } from './env.ts'
 import { ModelAuthError, ModelUnavailableError, type AgentModel } from './agentModel.ts'
 import type { TurnBlock } from './openaiAgent.ts'
@@ -430,7 +431,7 @@ function failureReason(err: unknown): string {
   if (err instanceof ModelUnavailableError)
     return 'The chosen model is not available on the connected account yet. Pick another model in Settings, then retry.'
   const message = err instanceof Error ? err.message : 'unknown error'
-  return `Doop could not finish this: ${message.slice(0, 200)}. Retry when you are ready.`
+  return `${brandAgentName()} could not finish this: ${message.slice(0, 200)}. Retry when you are ready.`
 }
 
 /** A billing/auth failure is account-wide — one card proving it is enough;

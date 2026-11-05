@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+* Display the configured agent name in task activity and repository extraction errors.
+
 ## [0.13.0](https://github.com/kgoedecke/doop/compare/v0.12.0...v0.13.0) (2026-11-04)
 
 
