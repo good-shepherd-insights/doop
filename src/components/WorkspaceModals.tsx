@@ -4,12 +4,11 @@ import { formatUsd, seatPerMonth, TEAM_SEAT_PRICE } from '../../shared/billing'
 import type { BillingInterval, Plan } from '../../shared/billing'
 import { api, errorMessage, paywalledWorkspace, type PlansResponse } from '../lib/api'
 import { authClient } from '../lib/auth'
-import { getBrand } from '../lib/branding'
 import { posthog } from '../lib/posthog'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Callout } from './ui/callout'
-import { ArrowRightIcon, CheckIcon } from './ui/icons'
+import { CheckIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from './ui/modal'
 import { Segmented, SegmentedItem } from './ui/segmented'
@@ -240,10 +239,7 @@ export function UpgradeModal({
             {error && <p className="mt-2 text-label text-accent-ink">{error}</p>}
             {session?.user.email && (
               <p className="mt-3 text-caption text-ink-faint">
-                {t('home.receipts', { email: session.user.email })}{' '}
-                <a className="font-semibold text-ink underline underline-offset-2" href={getBrand().websiteUrl}>
-                  {t('home.talkToUs')}
-                </a>
+                {t('home.receipts', { email: session.user.email })}
                 {t('home.receiptsEnd')}
               </p>
             )}
@@ -297,13 +293,9 @@ function PlanCard({ plan, interval, current }: { plan: Plan; interval: BillingIn
         ))}
       </ul>
       {plan.id === 'enterprise' && (
-        <a
-          className="mt-auto flex items-center gap-1 pt-4 text-body font-semibold text-ink underline underline-offset-2"
-          href={getBrand().websiteUrl}
-        >
+        <span className="mt-auto flex items-center gap-1 pt-4 text-body font-semibold text-ink">
           {t('home.contactUs')}
-          <ArrowRightIcon size={14} />
-        </a>
+        </span>
       )}
     </div>
   )

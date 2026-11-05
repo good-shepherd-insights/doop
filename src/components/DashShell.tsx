@@ -25,8 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
-import { DesktopIcon, ExportIcon, GearIcon, HelpIcon, LogOutIcon, ShieldIcon } from './ui/icons'
-import { DOWNLOAD_URL, WEBSITE_URL } from '../lib/siteLinks'
+import { GearIcon, LogOutIcon, ShieldIcon } from './ui/icons'
 
 /** The account menu the signed-in shell repeats on every page: in the rail
  *  and in the settings header. It lives here so they cannot drift apart. */
@@ -117,25 +116,6 @@ export function AccountMenu({
             <ShieldIcon size="rail" /> {t('shell.admin')}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem asChild>
-          <a href="/docs" target="_blank" rel="noopener noreferrer">
-            <HelpIcon size="rail" /> {t('shell.helpDocs')}
-          </a>
-        </DropdownMenuItem>
-        {/* new tabs, which the desktop shell hands to the system browser
-            (initDesktopShell); the desktop app has nothing to download */}
-        {!isDesktopShell() && (
-          <DropdownMenuItem asChild>
-            <a href={DOWNLOAD_URL()} target="_blank" rel="noopener noreferrer">
-              <DesktopIcon size="rail" /> {t('shell.desktopApp')}
-            </a>
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuItem asChild>
-          <a href={WEBSITE_URL()} target="_blank" rel="noopener noreferrer">
-            <ExportIcon size="rail" /> {t('shell.website')}
-          </a>
-        </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* the theme is one click from every page; picking one keeps the menu
             open so the change can be seen, and judged, before it closes */}

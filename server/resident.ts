@@ -379,7 +379,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      can still reach this point without a payable account — queued before the
      account was disconnected, or before metering tightened — and it must
      fail visibly with a fix, not crash on a key that was never meant to pay. */
-  const actor = actions.resolveActor({ name: role.name, kind: 'agent' })
+  const actor = actions.resolveActor({ name: brandAgentName(), kind: 'agent' })
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason = `The ${brandAgentName()} needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini or Claude API key in Settings, then retry.`
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer)) actions.failTaskFeedback(f.id, reason)

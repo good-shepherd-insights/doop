@@ -98,11 +98,6 @@ export function SideRail({
             </DropdownMenuTrigger>
           </Tooltip>
           <DropdownMenuContent side="left" align="end" width="sm">
-            <DropdownMenuItem asChild>
-              <a href="/docs" target="_blank" rel="noopener noreferrer">
-                <BookOpenIcon /> {t('canvas.docs')}
-              </a>
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => openSupportChat()}>
               <CommentIcon /> {t('canvas.contactSupport')}
             </DropdownMenuItem>
