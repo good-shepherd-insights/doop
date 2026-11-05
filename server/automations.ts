@@ -10,7 +10,8 @@ import * as meta from './meta.ts'
 import { AutomationPullError, extensions } from './extensions.ts'
 import { hasDurableCanvasAccess } from './access.ts'
 import { getUserName, isBanned } from './auth.ts'
-import { roleName } from '../shared/agents.ts'
+import { roleDisplayName } from '../shared/agents.ts'
+import { brandAgentName } from './branding.ts'
 import type { AgentTask } from '../shared/types.ts'
 import { env } from './env.ts'
 import {
@@ -474,7 +475,7 @@ export async function advanceRun(id: string): Promise<void> {
           return
         }
         state.summaries.push(
-          `Completed ${step.type === 'agent' ? step.title || roleName(step.roles[0]) : 'design task'}`,
+          `Completed ${step.type === 'agent' ? step.title || roleDisplayName(step.roles[0], brandAgentName()) : 'design task'}`,
         )
         for (const frameId of (task.frameIds ?? '').split(',').filter(Boolean)) {
           if (store.getFrame(frameId)?.canvasId === step.canvasId && state.links.length < 30)

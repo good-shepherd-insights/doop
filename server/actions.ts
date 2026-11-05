@@ -4,7 +4,15 @@ import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
-import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
+import {
+  DEFAULT_ROLE_ID,
+  mentionedRole,
+  normalizePipeline,
+  roleByAgentName,
+  roleName,
+  roleDisplayName,
+} from '../shared/agents.ts'
+import { brandAgentName } from './branding.ts'
 import { canvasPages } from '../shared/pages.ts'
 import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
@@ -1302,7 +1310,7 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
     ]
       .filter(Boolean)
       .join(' and ')
-    logActivity(canvasId, actor, `queued ${what} from ${input.repo} for ${roleName(DEFAULT_ROLE_ID)}`)
+    logActivity(canvasId, actor, `queued ${what} from ${input.repo} for ${brandAgentName()}`)
     import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
   }
   return cards
@@ -1347,7 +1355,7 @@ export function advanceCard(canvasId: string, cardId: string, by: Actor): AgentT
   delete card.failureReason
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
-  logActivity(canvasId, by, `handed “${card.status}” to ${roleName(pipeline[next])}`)
+  logActivity(canvasId, by, `handed “${card.status}” to ${roleDisplayName(pipeline[next], brandAgentName())}`)
   import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
   return card
 }

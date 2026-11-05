@@ -23,6 +23,8 @@ export type Branding = {
   logoUrl: string | null
   /** Wordmark for light surfaces; falls back to `logoUrl`. */
   logoUrlDark: string | null
+  /** Square mark replacing the built-in glyph; null = built-in Disc-D. */
+  markUrl: string | null
   /** Marketing site; null = doop.design (upstream default). */
   websiteUrl: string | null
   /** Desktop download page; null = upstream default. */
@@ -38,6 +40,7 @@ export const brandAgentName = () => env.BRAND_AGENT_NAME ?? env.APP_NAME
 
 export const brandLogoUrl = () => env.BRAND_LOGO_URL
 export const brandLogoUrlDark = () => env.BRAND_LOGO_URL_DARK ?? env.BRAND_LOGO_URL
+export const brandMarkUrl = () => env.BRAND_MARK_URL
 
 export const brandWebsiteUrl = () => env.BRAND_WEBSITE_URL ?? 'https://doop.design'
 export const brandDownloadUrl = () => env.BRAND_DOWNLOAD_URL ?? 'https://doop.design/download'
@@ -65,6 +68,7 @@ export function publicBranding(): Branding {
     agentName: brandAgentName(),
     logoUrl: env.BRAND_LOGO_URL ?? null,
     logoUrlDark: brandLogoUrlDark() ?? null,
+    markUrl: brandMarkUrl() ?? null,
     websiteUrl: brandWebsiteUrl(),
     downloadUrl: brandDownloadUrl(),
     emailPasswordAuth: emailPasswordAuth(),

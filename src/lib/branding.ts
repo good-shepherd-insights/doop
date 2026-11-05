@@ -19,6 +19,8 @@ export type Branding = {
   logoUrl: string | null
   /** Wordmark for light surfaces; falls back to `logoUrl`. */
   logoUrlDark: string | null
+  /** Square mark replacing the built-in Disc-D glyph; null = built-in. */
+  markUrl: string | null
   websiteUrl: string
   downloadUrl: string
   /** False = email/password sign-in is disabled server-side; the login
@@ -33,6 +35,7 @@ const FALLBACK: Branding = {
   agentName: 'Doop',
   logoUrl: null,
   logoUrlDark: null,
+  markUrl: null,
   websiteUrl: 'https://doop.design',
   downloadUrl: 'https://doop.design/download',
   emailPasswordAuth: true,

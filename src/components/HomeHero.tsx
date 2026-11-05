@@ -1,11 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { DRAFT_OPTIONS, DRAFTS_STORAGE_KEY, isDraftCount, readStoredDrafts, type DraftCount } from '../lib/homePrompt'
 import { setPromptBoxHidden, usePromptBoxHidden } from '../lib/homePreferences'
+import { useBrand } from '../lib/branding'
 import { DoopMark } from './Logo'
 import { ModelPicker } from './ModelPicker'
 import { BrandMark } from './ui/brand-mark'
 import { IconButton } from './ui/icon-button'
 import { Chip } from './ui/chip'
+
+/** The hero mark: the instance's own square mark when one is configured,
+ *  else the built-in Disc-D with its loading hop. */
+function HeroMark() {
+  const { markUrl } = useBrand()
+  if (markUrl) return <img src={markUrl} alt="" className="block h-full w-full object-contain" />
+  return <DoopMark animated size="fill" className="block" />
+}
+
 import { MenuButton } from './ui/menu-button'
 import { Pressable } from './ui/pressable'
 import { Textarea } from './ui/textarea'
@@ -238,7 +248,7 @@ export function HomeHero({
 
       <div className="relative px-4 pt-10 text-center md:pt-14">
         <span className="mx-auto mb-4 block h-[52px] w-[40px] text-ink md:mb-5 md:h-[62px] md:w-[48px]">
-          <DoopMark animated size="fill" className="block" />
+          <HeroMark />
         </span>
         <h1 className="font-hero text-title font-light leading-none md:text-display">
           {t('home.greeting')}

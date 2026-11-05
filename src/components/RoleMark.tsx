@@ -1,11 +1,12 @@
 import type { AgentRole } from '../../shared/agents'
+import { useBrand } from '@/lib/branding'
 import { DoopMark } from './Logo'
 import { cn } from '@/lib/utils'
 
 /** A role's badge: a filled circle in the role's crew colour with the white
- *  Doop mark inside, as on the marketing site's team section. `size` is the
- *  circle's diameter; the mark takes about half of it. An unknown role gets a
- *  neutral ink circle so a stale card still reads. */
+ *  Disc-D inside — or, when the instance sets a square brand mark, that mark
+ *  as the whole badge. `size` is the circle's diameter. An unknown role gets
+ *  a neutral ink circle so a stale card still reads. */
 export function RoleMark({
   role,
   size = 14,
@@ -17,6 +18,16 @@ export function RoleMark({
   className?: string
   style?: React.CSSProperties
 }) {
+  const { markUrl } = useBrand()
+  if (markUrl)
+    return (
+      <img
+        src={markUrl}
+        alt=""
+        className={cn('flex-none rounded-full object-cover align-middle', className)}
+        style={{ width: size, height: size, ...style }}
+      />
+    )
   return (
     <span
       className={cn('inline-grid flex-none place-items-center rounded-full align-middle', className)}

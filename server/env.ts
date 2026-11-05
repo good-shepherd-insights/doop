@@ -175,6 +175,10 @@ const schema = {
     desc: 'Wordmark/logo for light surfaces; falls back to BRAND_LOGO_URL',
   }),
   BRAND_AGENT_NAME: str({ default: undefined, desc: 'Resident agent display name; defaults to APP_NAME' }),
+  BRAND_MARK_URL: str({
+    default: undefined,
+    desc: 'Square agent mark replacing the built-in glyph everywhere it appears',
+  }),
   BRAND_WEBSITE_URL: origin({ default: undefined, desc: 'Marketing site linked from the UI; unset = doop.design' }),
   BRAND_DOWNLOAD_URL: origin({ default: undefined, desc: 'Desktop download page; unset = doop.design/download' }),
   BRAND_ASSETS_DIR: str({

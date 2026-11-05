@@ -8,7 +8,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Note } from './ui/note'
 import { Tooltip } from './ui/tooltip'
-import { DoopMark } from './Logo'
+import { AgentMark } from './AgentMark'
 import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
 import { LayerKindIcon } from './LayerKindIcon'
@@ -467,7 +467,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             </Note>
           ) : (
             <Note size="sm" className="text-[11px] text-ink-soft">
-              <DoopMark size={11} /> {t('panels.promptSent')}
+              <AgentMark size={11} /> {t('panels.promptSent')}
             </Note>
           )}
         </div>

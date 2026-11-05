@@ -6,7 +6,7 @@ import { navigate } from '../App'
 import { cn } from '@/lib/utils'
 import { useBrand } from '@/lib/branding'
 import { AgentIcon } from './AgentIcon'
-import { DoopMark } from './Logo'
+import { AgentMark } from './AgentMark'
 import { useAgentModels, useModelAccount } from './ModelAccount'
 import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
 import { useT, type PlainMessageKey } from '@/lib/i18n'
@@ -100,7 +100,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
                 <AgentIcon name={mark} size={12} />
               ) : (
                 /* no provider behind it: the agent's own mark */
-                <DoopMark size={11} className="block" />
+                <AgentMark size={11} className="block" />
               )}
             </span>
           }

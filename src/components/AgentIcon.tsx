@@ -3,7 +3,7 @@
  *  name wears which brand. */
 
 import { BrandMark, type Brand } from './ui/brand-mark'
-import { DoopMark } from './Logo'
+import { AgentMark } from './AgentMark'
 
 /** the brand an agent name reads as, or none for a Doop agent */
 export function agentBrandOf(name: string): Extract<Brand, 'claude' | 'openai' | 'cursor'> | undefined {
@@ -16,8 +16,8 @@ export function agentBrandOf(name: string): Extract<Brand, 'claude' | 'openai' |
 
 export function AgentIcon({ name, size = 13, color }: { name: string; size?: number; color?: string }) {
   const brand = agentBrandOf(name)
-  /* Anything else is a Doop agent (the built-in roles, or an unknown MCP
-     client) and wears the brand's own mark, as on the marketing site. */
-  if (!brand) return <DoopMark size={size} color={color} />
+  /* Anything else is a resident agent (the built-in roles, or an unknown MCP
+     client) and wears the instance's own mark, as on the marketing site. */
+  if (!brand) return <AgentMark size={size} color={color} />
   return <BrandMark brand={brand} size={size} color={color} className="mr-px inline-block align-[-2px]" />
 }
