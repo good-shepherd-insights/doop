@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { navigate } from '../App'
 import { useStore } from '../lib/store'
+import { getBrand } from '../lib/branding'
 import { roleByAgentName } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
-import { useT, type PlainMessageKey, type Translate } from '../lib/i18n'
+import { useT, type MessageKey, type PlainMessageKey, type Translate } from '../lib/i18n'
 import { canUseChatGPTPublicEndpoint, CHATGPT_CONNECTION_GUIDE, CHATGPT_PLUGINS_URL } from '../lib/chatgptConnection'
 import { AgentIcon } from './AgentIcon'
 import { ClaudeDesktopInstall } from './ClaudeDesktopInstall'
@@ -35,7 +36,7 @@ type ClaudeConnection = 'desktop' | 'web'
 /** a product's own name stays as it is; the generic client is named in the reader's language */
 type AgentOption = {
   id: AgentId
-  blurb: PlainMessageKey
+  blurb: MessageKey
   icon: ReactNode
 } & ({ name: string } | { nameKey: PlainMessageKey })
 
@@ -411,7 +412,7 @@ function AgentSteps({
      rest lives behind get_guide. The only thing this prompt knows that they don't is
      which canvas the human is looking at. */
   const prompt = canvasId
-    ? `Work on Doop canvas ${canvasId}. Start with get_guide({ topic: "doop-instructions" }) and follow it.`
+    ? `Work on ${getBrand().name} canvas ${canvasId}. Start with get_guide({ topic: "doop-instructions" }) and follow it.`
     : ''
   const { lede, steps } = agentSteps(t, agent, mcpUrl, prompt, claudeConnection, canvasId)
   return (

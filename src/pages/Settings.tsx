@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { navigate } from '../App'
-import { useT, type PlainMessageKey } from '../lib/i18n'
+import { useT, type MessageKey } from '../lib/i18n'
 import { ModelAccountPanel } from '../components/ModelAccount'
 import { ImageModelCard } from '../components/ImageModelCard'
 import { useAllowance } from '../components/TeamAllowance'
@@ -43,7 +43,7 @@ import {
 type Pane = 'general' | 'agent' | 'fonts' | 'keys' | 'webhooks' | 'account' | 'appearance'
 
 /* the heading over each pane, and the line under it */
-const panes: Record<Pane, { title: PlainMessageKey; blurb: PlainMessageKey }> = {
+const panes: Record<Pane, { title: MessageKey; blurb: MessageKey }> = {
   general: { title: 'settings.generalTitle', blurb: 'settings.generalBlurb' },
   agent: { title: 'settings.agentTitle', blurb: 'settings.agentBlurb' },
   fonts: { title: 'settings.fontsTitle', blurb: 'settings.fontsBlurb' },

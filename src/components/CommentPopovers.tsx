@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ElementComment } from '../../shared/types'
 import { colorFor } from '../../shared/types'
-import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName } from '../../shared/agents'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName, roleDisplayName } from '../../shared/agents'
+import { getBrand } from '../lib/branding'
 import { cn } from '@/lib/utils'
 import { canCommentOpenCanvas, canEditOpenCanvas, useStore } from '../lib/store'
 import { clientToWorld, dropComment, DRAG_THRESHOLD_PX } from '../lib/commentMove'
@@ -182,7 +183,7 @@ export function CommentComposer({
               variant="ghost"
               size="pill"
               className="border-dashed px-2 text-[11px] font-semibold text-ink-soft hover:border-brand hover:bg-transparent hover:text-brand"
-              title={`${role.name} — ${role.blurb}`}
+              title={`${roleDisplayName(role.id, getBrand().agentName)} — ${role.blurb}`}
               onClick={() => setText((current) => (current ? current.replace(/\s*$/, ' ') : '') + `@${role.id} `)}
             >
               <RoleMark role={role} size={13} /> @{role.id}
@@ -194,7 +195,7 @@ export function CommentComposer({
         {mentioned && (
           <span className="mr-auto inline-flex items-center gap-1 text-[11px] font-semibold text-brand">
             <RoleMark role={mentioned} size={13} />
-            {t('stage.willPickUp', { name: mentioned.name })}
+            {t('stage.willPickUp', { name: roleDisplayName(mentioned.id, getBrand().agentName) })}
           </span>
         )}
         <Button variant="solid" size="pill" className="px-3.5 py-[5px] text-xs" disabled={!text.trim()} onClick={send}>
@@ -208,12 +209,14 @@ export function CommentComposer({
 /** Where an @agent request in the thread stands, or null for a human note. */
 function agentStatus(c: ElementComment, t: Translate): ReactNode {
   const target = c.targetAgent ?? roleName(DEFAULT_ROLE_ID)
-  if (c.failedAt) return t('stage.agentStopped', { name: target })
+  /* display only: the stored targetAgent keeps the canonical role name */
+  const shown = target === roleName(DEFAULT_ROLE_ID) ? getBrand().agentName : target
+  if (c.failedAt) return t('stage.agentStopped', { name: shown })
   if (c.resolvedAt)
     return c.forAgent ? (
       <>
         <CheckIcon size={12} />
-        {c.resolvedBy ?? target}
+        {c.resolvedBy ?? shown}
       </>
     ) : null
   if (c.claimedBy)
@@ -226,7 +229,7 @@ function agentStatus(c: ElementComment, t: Translate): ReactNode {
   return c.forAgent ? (
     <>
       <SparkIcon size={12} />
-      {t('stage.waitingFor', { name: target })}
+      {t('stage.waitingFor', { name: shown })}
     </>
   ) : null
 }

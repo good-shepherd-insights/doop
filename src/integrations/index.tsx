@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
 import type { IntegrationsStatus } from '../lib/api'
-import type { PlainMessageKey } from '../lib/i18n'
+import type { MessageKey } from '../lib/i18n'
 import { linearIntegration } from './linear'
 import { slackIntegration } from './slack'
 
@@ -40,7 +40,7 @@ interface ClientIntegrationBase {
   /** its card in the import modal's source picker (with `ImportSection`) */
   importSource?: { title: string; blurb: string; icon: ReactNode }
   /** body copy of the shared disconnect confirm dialog, translated where it shows */
-  disconnectCopy: PlainMessageKey
+  disconnectCopy: MessageKey
   isConnected(status: IntegrationsStatus): boolean
   disconnect(): Promise<IntegrationsStatus>
   SettingsCard: ComponentType<SettingsCardProps>

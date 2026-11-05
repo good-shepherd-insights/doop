@@ -1,7 +1,8 @@
 import { clientIntegrations } from '../integrations'
 import { useEffect, useRef, useState } from 'react'
 import type { CanvasMeta } from '../../shared/types'
-import { AGENT_ROLES, roleById, roleName } from '../../shared/agents'
+import { AGENT_ROLES, roleById, roleDisplayName } from '../../shared/agents'
+import { getBrand } from '../lib/branding'
 import {
   AUTOMATION_EXAMPLES,
   MAX_NAME,
@@ -1051,12 +1052,14 @@ function AgentNode({
               onClick={() => onChange({ roles: [role.id] })}
             >
               <RoleMark role={role} size={13} />
-              {role.name}
+              {roleDisplayName(role.id, getBrand().agentName)}
             </Button>
           )
         })}
       </div>
-      <p className="mt-2 text-caption text-ink-faint">{t('automations.picksUp', { role: roleName(roles[0]) })}</p>
+      <p className="mt-2 text-caption text-ink-faint">
+        {t('automations.picksUp', { role: roleDisplayName(roles[0], getBrand().agentName) })}
+      </p>
       <CanvasPicker
         word={t('automations.canvasOn')}
         value={step.canvasId}

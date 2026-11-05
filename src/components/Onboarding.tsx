@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
+import { getBrand } from '../lib/branding'
 import { roleByAgentName } from '../../shared/agents'
 import { useIsMobile } from '../hooks/use-mobile'
 import { usePanelLayout } from '../lib/panelLayout'
@@ -94,7 +95,7 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
   /* the same one-line prompt the Connect AI modal hands out: the MCP server
      ships its own instructions on connect, so the prompt only needs to name
      the canvas */
-  const prompt = `Work on Doop canvas ${canvasId}. Start with get_guide({ topic: "doop-instructions" }) and follow it.`
+  const prompt = `Work on ${getBrand().name} canvas ${canvasId}. Start with get_guide({ topic: "doop-instructions" }) and follow it.`
 
   const checklist = (
     <>

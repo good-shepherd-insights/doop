@@ -9,6 +9,7 @@ import * as authSchema from './db/auth-schema.ts'
 import { store } from './store.ts'
 import * as demo from './demo.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
+import { brandName } from './branding.ts'
 import { acceptInvites } from './workspaces.ts'
 import { purgeUserData } from './accountDeletion.ts'
 import { MCP_REFRESH_TOKEN_TTL_S } from './mcpTokens.ts'
@@ -432,13 +433,13 @@ function buildAuth() {
        is printed to the server log instead, links included — and only when
        REQUIRE_EMAIL_VERIFICATION hasn't been turned off (see above). */
     emailAndPassword: {
-      enabled: true,
+      enabled: env.EMAIL_PASSWORD_AUTH,
       requireEmailVerification: REQUIRE_VERIFICATION,
       sendResetPassword: async ({ user, url }) => {
         await sendMail({
           to: user.email,
-          subject: 'Reset your doop password',
-          text: `Hi ${user.name || 'there'},\n\nSomeone asked to reset the password for this doop account. If that was you, open this link (valid for 1 hour):\n\n${url}\n\nIf it wasn't you, ignore this email — nothing changes.`,
+          subject: `Reset your ${brandName()} password`,
+          text: `Hi ${user.name || 'there'},\n\nSomeone asked to reset the password for this ${brandName()} account. If that was you, open this link (valid for 1 hour):\n\n${url}\n\nIf it wasn't you, ignore this email — nothing changes.`,
         })
       },
     },
@@ -456,8 +457,8 @@ function buildAuth() {
       sendVerificationEmail: async ({ user, url }) => {
         await sendMail({
           to: user.email,
-          subject: 'Verify your doop email',
-          text: `Hi ${user.name || 'there'},\n\nConfirm this email address to activate your doop account:\n\n${url}\n\nIf you didn't sign up for doop, ignore this email.`,
+          subject: `Verify your ${brandName()} email`,
+          text: `Hi ${user.name || 'there'},\n\nConfirm this email address to activate your ${brandName()} account:\n\n${url}\n\nIf you didn't sign up for ${brandName()}, ignore this email.`,
         })
       },
     },

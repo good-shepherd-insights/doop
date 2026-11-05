@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
 import { authErrorCode, authErrorMessage } from '../lib/authError'
+import { useBrand } from '../lib/branding'
 import { BrandMark } from '../components/ui/brand-mark'
 import { setName } from '../lib/identity'
 import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
@@ -16,7 +17,7 @@ import { ArrowRightIcon } from '../components/ui/icons'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
 import { Callout } from '../components/ui/callout'
-import { useT, type PlainMessageKey } from '../lib/i18n'
+import { useT, type MessageKey } from '../lib/i18n'
 
 /* If login interrupted an MCP OAuth authorize redirect, send the browser
    back into the flow so the agent connection completes. */
@@ -26,7 +27,7 @@ import { useT, type PlainMessageKey } from '../lib/i18n'
 /* A request that never reached the server (offline, a blocked request, a
    dropped connection) rejects instead of returning `res.error`; without a
    catch the form just stops spinning and says nothing. */
-const NETWORK_ERROR = 'auth.networkError' satisfies PlainMessageKey
+const NETWORK_ERROR = 'auth.networkError' satisfies MessageKey
 
 async function accountExists(email: string): Promise<boolean> {
   try {
@@ -68,7 +69,7 @@ function resumeOAuthFlow(): boolean {
 type AuthMode = 'signin' | 'signup' | 'forgot' | 'reset'
 
 /** the card's title for each mode */
-const TITLES: Record<AuthMode, PlainMessageKey> = {
+const TITLES: Record<AuthMode, MessageKey> = {
   signin: 'auth.titleSignin',
   signup: 'auth.titleSignup',
   forgot: 'auth.titleForgot',
@@ -101,7 +102,7 @@ function GoogleMark() {
    (see linkVerifiedProviderEmail in server/auth.ts for why that should now be
    rare, not why it can still happen — a provider that never sends
    email_verified, for instance). */
-const SSO_ERROR_MESSAGES: Record<string, PlainMessageKey> = {
+const SSO_ERROR_MESSAGES: Record<string, MessageKey> = {
   account_not_linked: 'auth.ssoAccountNotLinked',
   "email_doesn't_match": 'auth.ssoEmailMismatch',
   email_is_missing: 'auth.ssoEmailMissing',
@@ -123,7 +124,7 @@ const SIGNUP_RESTRICTED_PREFIX = 'Sign_up_is_restricted'
 
 /** What to show for a provider failure: the server's own words when it sent
  *  any (`text`), else the message key for the code (`key`). */
-type SsoError = { text: string } | { key: PlainMessageKey }
+type SsoError = { text: string } | { key: MessageKey }
 
 function ssoErrorFromUrl(): SsoError | null {
   const params = new URLSearchParams(location.search)
@@ -189,9 +190,13 @@ let browserSignInNotice: string | null = null
 export function AuthPage() {
   const t = useT()
   const oidc = useOidcConfig()
+  const { emailPasswordAuth: passwordAuth } = useBrand()
   /* better-auth lands password-reset links on /auth/reset?token=… */
   const resetToken = location.pathname === '/auth/reset' ? new URLSearchParams(location.search).get('token') : null
   const [mode, setMode] = useState<AuthMode>(resetToken ? 'reset' : 'signin')
+  /* with password auth off there is no reset or signup form to reach; a
+     stray reset link lands on the plain sign-in card */
+  const view: AuthMode = passwordAuth || mode !== 'reset' ? mode : 'signin'
   const [name, setNameField] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -356,20 +361,20 @@ export function AuthPage() {
 
   return (
     <AuthScreen>
-      <AuthCard as="form" title={t(TITLES[mode])} onSubmit={submit}>
+      <AuthCard as="form" title={t(TITLES[view])} onSubmit={submit}>
         <AuthCardText className="mb-2">
-          {mode === 'forgot' ? (
+          {view === 'forgot' ? (
             t('auth.forgotBlurb')
-          ) : mode === 'reset' ? (
+          ) : view === 'reset' ? (
             t('auth.resetBlurb')
           ) : (
             <>
               {t('auth.taglineBefore')} <em className="not-italic text-brand">{t('auth.taglineEmphasis')}</em>
-              {t('auth.taglineAfter')} {mode === 'signin' ? t('auth.taglineSignin') : t('auth.taglineSignup')}
+              {t('auth.taglineAfter')} {view === 'signin' ? t('auth.taglineSignin') : t('auth.taglineSignup')}
             </>
           )}
         </AuthCardText>
-        {(oidc.enabled || oidc.google || oidc.microsoft || oidc.apple) && (mode === 'signin' || mode === 'signup') && (
+        {(oidc.enabled || oidc.google || oidc.microsoft || oidc.apple) && (view === 'signin' || view === 'signup') && (
           <>
             {oidc.google && (
               <Button
@@ -382,7 +387,7 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <GoogleMark />
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Google' })}
+                {t(view === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Google' })}
               </Button>
             )}
             {oidc.microsoft && (
@@ -396,7 +401,7 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <MicrosoftMark />
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Microsoft' })}
+                {t(view === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Microsoft' })}
               </Button>
             )}
             {oidc.apple && (
@@ -410,7 +415,7 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <AppleMark />
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Apple' })}
+                {t(view === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Apple' })}
               </Button>
             )}
             {oidc.enabled && (
@@ -423,17 +428,22 @@ export function AuthPage() {
                 onClick={ssoSignIn}
                 disabled={busy}
               >
-                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: oidc.displayName ?? '' })}
+                {t(view === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: oidc.displayName ?? '' })}
               </Button>
             )}
-            <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-faint">
-              <span className="h-px flex-1 bg-line" />
-              {t('auth.or')}
-              <span className="h-px flex-1 bg-line" />
-            </div>
+            {passwordAuth && (
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-faint">
+                <span className="h-px flex-1 bg-line" />
+                {t('auth.or')}
+                <span className="h-px flex-1 bg-line" />
+              </div>
+            )}
           </>
         )}
-        {mode === 'signup' && (
+        {!passwordAuth && !(oidc.enabled || oidc.google || oidc.microsoft || oidc.apple) && (
+          <Callout>{t('auth.passwordAuthDisabled')}</Callout>
+        )}
+        {passwordAuth && mode === 'signup' && (
           <Field label={t('auth.nameLabel')} labelVariant="form">
             <Input
               variant="well"
@@ -444,7 +454,7 @@ export function AuthPage() {
             />
           </Field>
         )}
-        {mode !== 'reset' && (
+        {passwordAuth && mode !== 'reset' && (
           <Field label={t('auth.emailLabel')} labelVariant="form">
             <Input
               variant="well"
@@ -457,7 +467,7 @@ export function AuthPage() {
             />
           </Field>
         )}
-        {mode !== 'forgot' && (
+        {passwordAuth && mode !== 'forgot' && (
           <Field label={t(mode === 'reset' ? 'auth.newPasswordLabel' : 'auth.passwordLabel')} labelVariant="form">
             <Input
               variant="well"
@@ -471,7 +481,7 @@ export function AuthPage() {
             />
           </Field>
         )}
-        {mode === 'signin' && (
+        {passwordAuth && mode === 'signin' && (
           <Button
             variant="link"
             size="inline"
@@ -510,25 +520,29 @@ export function AuthPage() {
             )}
           </Callout>
         )}
-        <Button variant="primary" size="lg" block className="mt-2" type="submit" disabled={busy}>
-          {busy
-            ? '…'
-            : mode === 'signin'
-              ? t('auth.signIn')
-              : mode === 'signup'
-                ? t('auth.signUp')
-                : mode === 'forgot'
-                  ? t('auth.sendResetLink')
-                  : t('auth.setNewPassword')}
-        </Button>
-        <Button
-          variant="link"
-          size="sm"
-          className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
-          onClick={() => switchMode(mode === 'signin' ? 'signup' : 'signin')}
-        >
-          {t(mode === 'signin' ? 'auth.noAccountSignUp' : 'auth.haveAccountSignIn')}
-        </Button>
+        {passwordAuth && (
+          <>
+            <Button variant="primary" size="lg" block className="mt-2" type="submit" disabled={busy}>
+              {busy
+                ? '…'
+                : mode === 'signin'
+                  ? t('auth.signIn')
+                  : mode === 'signup'
+                    ? t('auth.signUp')
+                    : mode === 'forgot'
+                      ? t('auth.sendResetLink')
+                      : t('auth.setNewPassword')}
+            </Button>
+            <Button
+              variant="link"
+              size="sm"
+              className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
+              onClick={() => switchMode(mode === 'signin' ? 'signup' : 'signin')}
+            >
+              {t(mode === 'signin' ? 'auth.noAccountSignUp' : 'auth.haveAccountSignIn')}
+            </Button>
+          </>
+        )}
       </AuthCard>
     </AuthScreen>
   )

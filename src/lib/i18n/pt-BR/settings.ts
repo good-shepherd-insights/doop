@@ -8,12 +8,12 @@ export const settings: Catalog['settings'] = {
   canvas: 'Canvas',
 
   generalTitle: 'Geral',
-  generalBlurb: 'Deixe o Doop do jeito que você gosta neste navegador.',
+  generalBlurb: 'Deixe o {brand} do jeito que você gosta neste navegador.',
   homeDashboardTitle: 'Painel inicial',
   homeDashboardDescription: 'Escolha o que aparece no seu painel inicial neste navegador.',
   showPromptBox: 'Mostrar a caixa de prompt',
   showPromptBoxHint: 'Comece um design a partir de um prompt no painel inicial.',
-  agentTitle: 'Doop Agent',
+  agentTitle: '{brandAgent}',
   agentBlurb: 'Em qual conta de modelo o agente roda, em todos os canvases em que você trabalha.',
   fontsTitle: 'Fontes',
   fontsBlurb: 'Suas próprias fontes, para criar nos seus canvases pessoais.',
@@ -26,16 +26,16 @@ export const settings: Catalog['settings'] = {
   accountBlurb: 'Quem você é em cada canvas — e como voltar a entrar neste.',
   appearanceTitle: 'Aparência',
   appearanceBlurb:
-    'Como o Doop aparece neste navegador: claro ou escuro, o idioma em que ele fala e como o editor do canvas organiza seus painéis.',
+    'Como o {brand} aparece neste navegador: claro ou escuro, o idioma em que ele fala e como o editor do canvas organiza seus painéis.',
 
   agentCardDescription:
-    'Escolha como o Doop Agent roda nos seus canvases: uma conta de modelo conectada ou o Claude CLI no seu computador. Os limites de uso e as cobranças do seu provedor se aplicam.',
-  freeTasksLeftLabel: 'Tarefas gratuitas restantes do Doop Agent',
+    'Escolha como o {brandAgent} roda nos seus canvases: uma conta de modelo conectada ou o Claude CLI no seu computador. Os limites de uso e as cobranças do seu provedor se aplicam.',
+  freeTasksLeftLabel: 'Tarefas gratuitas restantes do {brandAgent}',
   meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado — conexão gerenciada pelo seu operador.',
   meterClaudeLocal: 'Claude CLI selecionado — roda no seu computador conectado.',
   meterChatgpt: 'Rodando na sua assinatura do ChatGPT.',
   meterProviderKey: 'Rodando na sua chave da {provider}.',
-  meterNoFreeTasks: 'Este servidor não oferece tarefas gratuitas — conecte uma conta para usar o Doop Agent.',
+  meterNoFreeTasks: 'Este servidor não oferece tarefas gratuitas — conecte uma conta para usar o {brandAgent}.',
   meterUsedUp: 'Suas tarefas gratuitas acabaram.',
   meterLeft: {
     one: '{left} de {count} tarefa gratuita restante.',
@@ -57,7 +57,7 @@ export const settings: Catalog['settings'] = {
 
   languageTitle: 'Idioma',
   languageDescription:
-    'O idioma em que as telas do Doop aparecem neste navegador. Enquanto você não escolher um, vale o padrão configurado neste servidor.',
+    'O idioma em que as telas do {brand} aparecem neste navegador. Enquanto você não escolher um, vale o padrão configurado neste servidor.',
   languageRow: 'Idioma',
   languageAria: 'Idioma',
   languagePicked: 'Escolhido neste navegador.',

@@ -98,6 +98,16 @@ export const PIPELINE_PRESETS: { id: string; label: string; roles: string[] }[] 
 const byId = new Map(AGENT_ROLES.map((r) => [r.id, r]))
 const byName = new Map(AGENT_ROLES.map((r) => [r.name.toLowerCase(), r]))
 
+/** The name shown for a role. The resident role displays the instance's agent
+ *  name (BRAND_AGENT_NAME) while every identity use — @mentions, targetAgent
+ *  matching, stored cards — keeps the canonical role.name. Each environment
+ *  passes its own resolved name: undefined keeps the canonical one. */
+export function roleDisplayName(roleId: string | undefined, residentAgentName?: string): string {
+  const role = roleId ? byId.get(roleId) : undefined
+  if (!role) return roleId ?? ''
+  return role.id === DEFAULT_ROLE_ID && residentAgentName ? residentAgentName : role.name
+}
+
 export function roleById(id: string | undefined): AgentRole | undefined {
   return id ? byId.get(id) : undefined
 }

@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { brandName } from './branding.ts'
 import nodemailer from 'nodemailer'
 import type { Transporter } from 'nodemailer'
 
@@ -30,7 +31,7 @@ export async function sendMail(opts: { to: string; subject: string; text: string
     return
   }
   await transport.sendMail({
-    from: env.EMAIL_FROM,
+    from: env.EMAIL_FROM ?? `${brandName()} <no-reply@localhost>`,
     to: opts.to,
     subject: opts.subject,
     text: opts.text,

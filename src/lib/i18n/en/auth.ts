@@ -1,8 +1,8 @@
 /** The signed-out screens: sign-in, sign-up, password reset, OAuth consent,
  *  the desktop app's browser hand-offs, and the "view as" banner. */
 export const auth = {
-  networkError: 'Could not reach doop — check your connection and try again.',
-  unreachable: 'doop could not be reached — it may be restarting. Try again in a moment.',
+  networkError: 'Could not reach {brand} — check your connection and try again.',
+  unreachable: '{brand} could not be reached — it may be restarting. Try again in a moment.',
   somethingWentWrong: 'Something went wrong',
   somethingWentWrongTitle: 'Something went wrong.',
 
@@ -44,14 +44,14 @@ export const auth = {
   resendVerification: 'Resend verification email',
 
   ssoAccountNotLinked:
-    'That email already has a doop account that could not be linked automatically — sign in with email/password instead.',
+    'That email already has a {brand} account that could not be linked automatically — sign in with email/password instead.',
   ssoEmailMismatch: "The signed-in email doesn't match the account you started from — try again.",
-  ssoEmailMissing: "Your identity provider didn't share an email address — doop needs one to sign you in.",
+  ssoEmailMissing: "Your identity provider didn't share an email address — {brand} needs one to sign you in.",
   ssoDesktopHandoff:
     'That sign-in link has expired — start again and finish in your browser within a couple of minutes.',
   ssoFailed: 'Sign-in failed — try again or use email/password.',
   startFailed: 'Could not start sign-in — try again or use email/password.',
-  browserSignInNotice: 'Finish signing in in your browser — doop signs you in here the moment you come back.',
+  browserSignInNotice: 'Finish signing in in your browser — {brand} signs you in here the moment you come back.',
   verificationSent: 'Verification email sent — check your inbox.',
   resetLinkSent: 'If an account exists for that email, a reset link is on its way.',
   resetLinkInvalid: 'This reset link is invalid or expired — request a new one.',
@@ -73,22 +73,23 @@ export const auth = {
   connecting: 'Connecting…',
   connect: 'Connect',
 
-  desktopLinkIncomplete: 'This sign-in link is incomplete — go back to the doop app and try again.',
-  desktopStartFailed: 'Could not start sign-in — go back to the doop app and try again.',
+  desktopLinkIncomplete: 'This sign-in link is incomplete — go back to the {brand} app and try again.',
+  desktopStartFailed: 'Could not start sign-in — go back to the {brand} app and try again.',
   desktopSigningIn: 'Signing you in…',
-  desktopToProvider: 'Taking you to your identity provider for the doop app.',
+  desktopToProvider: 'Taking you to your identity provider for the {brand} app.',
   desktopSignedIn: "You're signed in.",
-  desktopHandoffFailed: 'Could not hand the sign-in over to the doop app. Go back to the app and try again.',
-  desktopSendingBack: 'Sending you back to the doop app… You can close this tab afterwards.',
-  openDoop: 'Open doop',
-  desktopConnectTitle: 'Back to the doop app.',
+  desktopHandoffFailed: 'Could not hand the sign-in over to the {brand} app. Go back to the app and try again.',
+  desktopSendingBack: 'Sending you back to the {brand} app… You can close this tab afterwards.',
+  openDoop: 'Open {brand}',
+  desktopConnectTitle: 'Back to the {brand} app.',
   desktopConnectBody:
-    'Doop finishes connecting in the app, for the account signed in there. You can close this tab afterwards.',
-  desktopConnectFailed: 'Could not hand the connection over to the doop app. Go back to the app and try again.',
+    '{brand} finishes connecting in the app, for the account signed in there. You can close this tab afterwards.',
+  desktopConnectFailed: 'Could not hand the connection over to the {brand} app. Go back to the app and try again.',
 
   /* "Viewing as <name> — read only, expires after 15 minutes." */
   viewingAsBefore: 'Viewing as',
   viewingAsAfter: '— read only, expires after 15 minutes.',
   stopViewing: 'Stop viewing',
   leaving: 'Leaving…',
+  passwordAuthDisabled: 'Email and password sign-in is turned off for this {brand}. Sign in with a provider instead.',
 } as const

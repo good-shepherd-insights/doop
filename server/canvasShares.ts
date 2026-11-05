@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
+import { brandName } from './branding.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { canvasLink } from './links.ts'
 import type { Canvas } from '../shared/types.ts'
@@ -25,7 +26,7 @@ export function shareEmail(
   return {
     to: invitee.email,
     subject: `${inviter.name} shared ${title} with you`,
-    text: `Hi ${invitee.name || 'there'},\n\n${inviter.name} (${inviter.email}) invited you to collaborate on ${title} on doop. You can view, comment and edit.\n\nOpen the canvas:\n${canvasLink(canvas.id)}\n\nIt is also listed under “Shared with me” on your home page.\n`,
+    text: `Hi ${invitee.name || 'there'},\n\n${inviter.name} (${inviter.email}) invited you to collaborate on ${title} on ${brandName()}. You can view, comment and edit.\n\nOpen the canvas:\n${canvasLink(canvas.id)}\n\nIt is also listed under “Shared with me” on your home page.\n`,
   }
 }
 

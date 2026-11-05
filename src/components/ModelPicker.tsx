@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { navigate } from '../App'
 import { cn } from '@/lib/utils'
+import { useBrand } from '@/lib/branding'
 import { AgentIcon } from './AgentIcon'
 import { DoopMark } from './Logo'
 import { useAgentModels, useModelAccount } from './ModelAccount'
@@ -49,11 +50,12 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const t = useT()
+  const brand = useBrand()
   const catalog = useAgentModels(account, open)
   const kind = account?.connected ? account.kind : undefined
   const menu = (catalog?.live ? catalog.models : undefined) ?? (kind && account?.menus?.[kind]) ?? []
   const current = menu.find((m) => m.id === account?.model)
-  const label = current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : 'Doop Agent')
+  const label = current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : brand.agentName)
   const mark = kind ? PROVIDER_MARK[kind] : undefined
 
   async function pick(model: string) {

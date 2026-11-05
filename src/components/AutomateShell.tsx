@@ -7,7 +7,7 @@ import { CheckIcon, ClockIcon } from './ui/icons'
 import { cn } from '@/lib/utils'
 import { clientIntegrations } from '../integrations'
 import type { AutomationExample, Schedule } from '../../shared/automations'
-import { getLocale, useT, type PlainMessageKey, type Translate } from '@/lib/i18n'
+import { getLocale, useT, type MessageKey, type PlainMessageKey, type Translate } from '@/lib/i18n'
 
 /**
  * Pieces the Automations and Integrations pages share: the provider and
@@ -207,7 +207,7 @@ export function incompleteText(t: Translate, reason: string): string {
 }
 
 /* what an example's card says; its brief stays English, for the agent */
-const EXAMPLE_LABEL: Record<string, { name: PlainMessageKey; blurb: PlainMessageKey }> = {
+const EXAMPLE_LABEL: Record<string, { name: PlainMessageKey; blurb: MessageKey }> = {
   'approved-sizes': {
     name: 'automations.exampleApprovedSizesName',
     blurb: 'automations.exampleApprovedSizesBlurb',

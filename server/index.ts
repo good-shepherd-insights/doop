@@ -1,4 +1,6 @@
 import { env } from './env.ts'
+import { publicBranding } from './branding.ts'
+import { brandedIndexHtml, buildId } from './indexHtml.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
@@ -9,8 +11,7 @@ import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
-import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import express from 'express'
 import { eq, inArray } from 'drizzle-orm'
@@ -92,20 +93,12 @@ import type { Canvas, ClientMessage, Presence, ServerMessage } from '../shared/t
 
 const PORT = env.PORT
 
-/* Identifies the client bundle this process serves. Hashing dist/index.html
-   works because Vite writes hashed asset names into it — any frontend change
-   changes the hash, while server-only deploys and plain restarts do not.
-   Clients compare it across reconnects to know their loaded bundle is stale. */
-const BUILD_ID = (() => {
-  try {
-    return createHash('sha1')
-      .update(readFileSync(path.join(process.cwd(), 'dist', 'index.html')))
-      .digest('hex')
-      .slice(0, 12)
-  } catch {
-    return 'dev'
-  }
-})()
+/* Identifies the client bundle this process serves: a short hash of the
+   branded index.html (server/indexHtml.ts), which embeds Vite's hashed
+   asset names — any frontend change changes the hash, while server-only
+   deploys and plain restarts do not. Clients compare it across reconnects
+   to know their loaded bundle is stale. */
+const BUILD_ID = buildId()
 
 /* boot: connect the DB, hydrate memory, import pre-DB store.json once */
 await initDb()
@@ -324,6 +317,43 @@ const app = express()
 app.set('trust proxy', 1)
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
+
+/* The signed-out login screen and the app shell read their brand (name,
+   wordmark, whether email/password sign-in exists) from here. Public by
+   design — it brands the login page — and cached briefly so an env change
+   propagates without pinning every already-open client. */
+app.get('/api/branding', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=300')
+  res.json(publicBranding())
+})
+
+/* Brand asset overrides. With BRAND_ASSETS_DIR set, favicon/apple-touch-icon
+   swap only when the replacement file exists in that directory, so an
+   incomplete directory falls back to the built-ins; /brand-assets/:file
+   serves everything else in it (wordmarks referenced by BRAND_LOGO_URL).
+   Registered ahead of the production static middleware, which would
+   otherwise answer the favicon paths from dist/ first. */
+if (env.BRAND_ASSETS_DIR) {
+  const dir = env.BRAND_ASSETS_DIR
+  app.get('/brand-assets/:file', (req, res, next) => {
+    const { file } = req.params
+    /* a plain filename only: the directory is fixed, so no separators and no
+       dot-directories can pull the route outside it */
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file)) return next()
+    res.sendFile(path.join(dir, file), (err) => {
+      if (err) next(err)
+    })
+  })
+  for (const name of ['favicon.ico', 'favicon.png', 'apple-touch-icon.png']) {
+    app.get(`/${name}`, (_req, res, next) => {
+      const file = path.join(dir, name)
+      if (!existsSync(file)) return next()
+      res.sendFile(file, (err) => {
+        if (err) next(err)
+      })
+    })
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* PostHog relay: the client sends analytics + session-replay traffic  */
@@ -2513,14 +2543,16 @@ app.get('/sitemap.xml', (_req, res) => {
     )
 })
 
-/* production: serve the built client */
+/* production: serve the built client. index: false — the catch-all answers
+   with the branded index.html (server/indexHtml.ts); the favicon overrides
+   registered earlier already had first claim, hashed assets pass through. */
 if (env.isProduction) {
   const dist = path.join(process.cwd(), 'dist')
-  app.use(express.static(dist))
+  app.use(express.static(dist, { index: false }))
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
   app.get('/assets/*', (_req, res) => res.sendStatus(404))
-  app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')))
+  app.get('*', (_req, res) => res.type('html').send(brandedIndexHtml()))
 }
 
 /* ------------------------------------------------- websocket */

@@ -7,7 +7,7 @@ export const shell = {
   admin: 'Admin',
   helpDocs: 'Help & docs',
   desktopApp: 'Get desktop app',
-  website: 'Doop website',
+  website: '{brand} website',
   appearance: 'Appearance',
   language: 'Language',
   logOut: 'Log out',

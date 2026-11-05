@@ -44,7 +44,7 @@ export const panels: Catalog['panels'] = {
     '— fixe um frame que você adora (Fixar como referência, no inspetor dele). Os agentes copiam as cores, a tipografia e o layout dele quando criam algo novo.',
   memoryIntroRules: '— guias de estilo que os agentes leem antes de criar. Escreva-os ou deixe-os crescer.',
   memoryIntroDecisions:
-    '— o feedback que você dá aos agentes é registrado aqui automaticamente assim que é atendido. Quando uma preferência se repete, o Doop sugere adicioná-la às suas regras.',
+    '— o feedback que você dá aos agentes é registrado aqui automaticamente assim que é atendido. Quando uma preferência se repete, o {brand} sugere adicioná-la às suas regras.',
   memorySuggestion: 'Sugestão de memória',
   memoryFromDecisions: { one: 'a partir de {count} decisão', other: 'a partir de {count} decisões' },
   memoryDismiss: 'Dispensar',
@@ -148,7 +148,7 @@ export const panels: Catalog['panels'] = {
   activityClosePanel: 'Fechar painel',
   activityRecentTasks: 'Tarefas recentes',
   activityNoTasks:
-    'Nenhuma tarefa ainda. Peça ao Doop Agent abaixo ou conecte o seu — o que os agentes fazem aparece aqui.',
+    'Nenhuma tarefa ainda. Peça ao {brandAgent} abaixo ou conecte o seu — o que os agentes fazem aparece aqui.',
   activityWorkingOn: 'Em andamento',
   activityWorkedOn: 'Concluídas',
   activityShowLess: 'Mostrar menos',
@@ -170,21 +170,21 @@ export const panels: Catalog['panels'] = {
   promptScopedElement: 'Restrito a {name} neste frame',
   promptRemoveFrameScope: 'Remover restrição ao frame',
   promptRemoveElementScope: 'Remover restrição ao elemento',
-  promptAria: 'Pergunte ao Doop Agent',
+  promptAria: 'Pergunte ao {brandAgent}',
   promptPlaceholderFrame: 'O que deve mudar neste frame…',
   promptPlaceholderElement: 'O que deve mudar neste elemento…',
-  promptPlaceholder: 'Peça ao Doop para criar algo…',
+  promptPlaceholder: 'Peça ao {brand} para criar algo…',
   promptAttach: 'Anexar imagens',
   promptAttachTitle: 'Anexar capturas de tela ou imagens',
   promptSendTooltip: 'Enviar (Enter)',
   promptSend: 'Enviar',
-  promptSent: 'O Doop Agent já está nisso — acompanhe o canvas',
+  promptSent: 'O {brandAgent} já está nisso — acompanhe o canvas',
 
   modelFallback: 'Modelo',
   modelAria: 'Modelo: {label}',
-  modelCaption: 'Modelo do Doop Agent',
+  modelCaption: 'Modelo do {brandAgent}',
   modelNoAccount:
-    'Nenhuma conta de modelo conectada — o Doop Agent usa o modelo do servidor quando houver um configurado.',
+    'Nenhuma conta de modelo conectada — o {brandAgent} usa o modelo do servidor quando houver um configurado.',
   modelSettings: 'Configurações do modelo…',
   modelConnect: 'Conectar um modelo…',
 
@@ -209,7 +209,7 @@ export const panels: Catalog['panels'] = {
   sharePublishFailed: 'falha ao publicar',
   shareCopyFailed: 'Não foi possível copiar o link. Copie a URL do seu navegador.',
   shareTitle: 'Compartilhar “{name}”',
-  shareInvitePlaceholder: 'Convidar por e-mail (conta doop)',
+  shareInvitePlaceholder: 'Convidar por e-mail (conta {brand})',
   shareInvite: 'Convidar',
   shareYou: '{name} (você)',
   shareOwner: 'Dono',
@@ -230,7 +230,7 @@ export const panels: Catalog['panels'] = {
   shareCopyLink: 'Copiar link',
   shareUpgradeReason: 'Mover um canvas para um workspace exige um plano Team.',
   shareGalleryTitle:
-    'Qualquer pessoa no doop pode visualizar e copiar um canvas listado. O canvas em si continua privado.',
+    'Qualquer pessoa no {brand} pode visualizar e copiar um canvas listado. O canvas em si continua privado.',
   shareGallery: 'Mostrar na galeria da comunidade',
   shareGalleryBlurb: 'As pessoas podem visualizá-lo e copiá-lo para a própria conta. Seu canvas continua privado.',
   shareDescriptionPlaceholder: 'O que é este design? Uma ou duas linhas ajudam as pessoas a encontrá-lo.',
@@ -287,7 +287,7 @@ export const panels: Catalog['panels'] = {
   historyCurrent: 'Atual',
   historyEmpty: 'Nenhuma versão anterior ainda — elas aparecem quando um design é substituído.',
 
-  importTitle: 'Importar para o Doop',
+  importTitle: 'Importar para o {brand}',
   importLede:
     'Escolha uma origem. Importações que encontram várias páginas ou frames mostram uma revisão antes de qualquer coisa entrar.',
   importSoon: 'Em breve',

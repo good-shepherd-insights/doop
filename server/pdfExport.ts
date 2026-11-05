@@ -1,4 +1,5 @@
 import { PDFDocument } from 'pdf-lib'
+import { brandSlug } from './branding.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
@@ -183,5 +184,5 @@ export function takePdfExportSlot(key: string, now = Date.now()): boolean {
 /** A download name for the PDF: the frame's name for one frame, else the canvas's. */
 export function pdfFileName(canvas: Canvas, frames: readonly Frame[]): string {
   const name = frames.length === 1 ? frames[0]!.name : canvas.name
-  return `${name.replace(/[^\w\- ]+/g, '').trim() || 'doop'}.pdf`
+  return `${name.replace(/[^\w\- ]+/g, '').trim() || brandSlug()}.pdf`
 }

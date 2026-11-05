@@ -8,7 +8,7 @@ export const shell: Catalog['shell'] = {
   admin: 'Admin',
   helpDocs: 'Ajuda e documentação',
   desktopApp: 'Baixar o app para desktop',
-  website: 'Site do Doop',
+  website: 'Site do {brand}',
   appearance: 'Aparência',
   language: 'Idioma',
   logOut: 'Sair',

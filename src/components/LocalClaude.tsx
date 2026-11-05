@@ -99,7 +99,7 @@ function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
           <p className="text-[13px] text-ink-faint">{active ? t('models.waitingDesktop') : t('models.useInDesktop')}</p>
           <a
             className="inline-flex items-center gap-[7px] py-1 text-[13px] font-semibold text-brand hover:underline"
-            href={DOWNLOAD_URL}
+            href={DOWNLOAD_URL()}
             target="_blank"
             rel="noreferrer"
           >

@@ -1,8 +1,8 @@
 import type { Catalog } from '..'
 
 export const auth: Catalog['auth'] = {
-  networkError: 'Não foi possível acessar o doop — verifique sua conexão e tente de novo.',
-  unreachable: 'Não foi possível acessar o doop — ele pode estar reiniciando. Tente de novo em instantes.',
+  networkError: 'Não foi possível acessar o {brand} — verifique sua conexão e tente de novo.',
+  unreachable: 'Não foi possível acessar o {brand} — ele pode estar reiniciando. Tente de novo em instantes.',
   somethingWentWrong: 'Algo deu errado',
   somethingWentWrongTitle: 'Algo deu errado.',
 
@@ -42,14 +42,14 @@ export const auth: Catalog['auth'] = {
   resendVerification: 'Reenviar e-mail de verificação',
 
   ssoAccountNotLinked:
-    'Esse e-mail já tem uma conta no doop que não pôde ser vinculada automaticamente — entre com e-mail e senha.',
+    'Esse e-mail já tem uma conta no {brand} que não pôde ser vinculada automaticamente — entre com e-mail e senha.',
   ssoEmailMismatch: 'O e-mail com que você entrou não corresponde à conta de onde você começou — tente de novo.',
   ssoEmailMissing:
-    'Seu provedor de identidade não compartilhou um endereço de e-mail — o doop precisa de um para você entrar.',
+    'Seu provedor de identidade não compartilhou um endereço de e-mail — o {brand} precisa de um para você entrar.',
   ssoDesktopHandoff: 'Esse link de acesso expirou — comece de novo e conclua no navegador em poucos minutos.',
   ssoFailed: 'Não foi possível entrar — tente de novo ou use e-mail e senha.',
   startFailed: 'Não foi possível iniciar o acesso — tente de novo ou use e-mail e senha.',
-  browserSignInNotice: 'Conclua o acesso no navegador — o doop conecta você aqui assim que você voltar.',
+  browserSignInNotice: 'Conclua o acesso no navegador — o {brand} conecta você aqui assim que você voltar.',
   verificationSent: 'E-mail de verificação enviado — confira sua caixa de entrada.',
   resetLinkSent: 'Se existir uma conta com esse e-mail, um link de redefinição já está a caminho.',
   resetLinkInvalid: 'Este link de redefinição é inválido ou expirou — solicite um novo.',
@@ -71,20 +71,23 @@ export const auth: Catalog['auth'] = {
   connecting: 'Conectando…',
   connect: 'Conectar',
 
-  desktopLinkIncomplete: 'Este link de acesso está incompleto — volte ao app do doop e tente de novo.',
-  desktopStartFailed: 'Não foi possível iniciar o acesso — volte ao app do doop e tente de novo.',
+  desktopLinkIncomplete: 'Este link de acesso está incompleto — volte ao app do {brand} e tente de novo.',
+  desktopStartFailed: 'Não foi possível iniciar o acesso — volte ao app do {brand} e tente de novo.',
   desktopSigningIn: 'Entrando…',
-  desktopToProvider: 'Levando você ao seu provedor de identidade para o app do doop.',
+  desktopToProvider: 'Levando você ao seu provedor de identidade para o app do {brand}.',
   desktopSignedIn: 'Você entrou.',
-  desktopHandoffFailed: 'Não foi possível passar o acesso para o app do doop. Volte ao app e tente de novo.',
-  desktopSendingBack: 'Levando você de volta ao app do doop… Você pode fechar esta aba depois.',
-  openDoop: 'Abrir o doop',
-  desktopConnectTitle: 'De volta ao app do doop.',
-  desktopConnectBody: 'O doop conclui a conexão no app, para a conta conectada lá. Você pode fechar esta aba depois.',
-  desktopConnectFailed: 'Não foi possível passar a conexão para o app do doop. Volte ao app e tente de novo.',
+  desktopHandoffFailed: 'Não foi possível passar o acesso para o app do {brand}. Volte ao app e tente de novo.',
+  desktopSendingBack: 'Levando você de volta ao app do {brand}… Você pode fechar esta aba depois.',
+  openDoop: 'Abrir o {brand}',
+  desktopConnectTitle: 'De volta ao app do {brand}.',
+  desktopConnectBody:
+    'O {brand} conclui a conexão no app, para a conta conectada lá. Você pode fechar esta aba depois.',
+  desktopConnectFailed: 'Não foi possível passar a conexão para o app do {brand}. Volte ao app e tente de novo.',
 
   viewingAsBefore: 'Visualizando como',
   viewingAsAfter: '— somente leitura, expira em 15 minutos.',
   stopViewing: 'Parar de visualizar',
   leaving: 'Saindo…',
+  passwordAuthDisabled:
+    'O acesso por e-mail e senha está desativado nesta instância de {brand}. Entre com um provedor.',
 }

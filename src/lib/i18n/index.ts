@@ -1,6 +1,7 @@
 import { en } from './en'
 import { ptBR } from './pt-BR'
 import { getLocale, useLocale, type Locale } from './locale'
+import { brandVars } from '../branding'
 
 export { LOCALES, LOCALE_NAMES, isLocale, getLocale, setLocale, useLocale, initLocale, type Locale } from './locale'
 
@@ -40,9 +41,19 @@ type ParamsOf<M> = M extends string
 
 /* a key without placeholders takes no second argument; one with them must
    be given every value it names */
-type VarsArg<K extends MessageKey> = [ParamsOf<MessageOf<K>>] extends [never]
-  ? []
-  : [vars: Record<ParamsOf<MessageOf<K>>, string | number>]
+/* {brand} and {brandAgent} name the instance, not the sentence: the engine
+   injects them into every message (brandVars), so a catalog can carry the
+   app name without every t() call site passing it. They are therefore
+   excluded from the params a call site must supply. */
+type BrandParam = 'brand' | 'brandAgent'
+
+type VarsArg<K extends MessageKey> = MessageKey extends K
+  ? /* a key only known at runtime (a table of keys): vars become optional,
+       since the concrete placeholders are not decidable here */
+    [vars?: Vars]
+  : [Exclude<ParamsOf<MessageOf<K>>, BrandParam>] extends [never]
+    ? []
+    : [vars: Record<Exclude<ParamsOf<MessageOf<K>>, BrandParam>, string | number>]
 
 /** A key that takes no values: the type for keys kept in a table (a list of
  *  tabs, a set of options) and looked up later, where the key is not a
@@ -68,8 +79,9 @@ function pick(message: Message, locale: Locale, vars: Vars | undefined): string 
 }
 
 function fill(text: string, vars: Vars | undefined): string {
-  if (!vars) return text
-  return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match))
+  /* brand values are defaults, so a call site may still override them */
+  const merged = { ...brandVars(), ...vars }
+  return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in merged ? String(merged[name]) : match))
 }
 
 /** The message for `key` in `locale`, falling back to English and then to the

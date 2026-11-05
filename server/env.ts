@@ -50,6 +50,12 @@ const list = makeExactValidator<string[]>((input) =>
     .filter(Boolean),
 )
 
+/** A 3/4/6/8-digit CSS hex color, kept lowercase. */
+const hexColor = makeExactValidator<string>((input) => {
+  if (!/^#[0-9a-fA-F]{3,8}$/.test(input)) throw new TypeError(`Invalid hex color: "${input}"`)
+  return input.toLowerCase()
+})
+
 export interface SecretKey {
   id: string
   key: Buffer
@@ -140,7 +146,47 @@ const schema = {
   SMTP_USER: str({ default: undefined }),
   SMTP_PASS: str({ default: undefined }),
   SMTP_SECURE: bool({ default: false }),
-  EMAIL_FROM: str({ default: 'doop <no-reply@localhost>' }),
+  EMAIL_FROM: str({
+    default: undefined,
+    desc: 'From header of outgoing email; defaults to "<APP_NAME> <no-reply@localhost>"',
+  }),
+
+  /* ------------------------------------------------------- branding */
+  /* Whitelabel surface. Every default is Doop's own brand, so an unset
+     variable means today's behaviour; a self-host sets the ones it wants. */
+  APP_NAME: str({ default: 'Doop', desc: 'Display name across the UI, page title, emails and MCP metadata' }),
+  BRAND_TAGLINE: str({ default: 'designed by Agents & Humans', desc: 'Slogan after the name in the page title' }),
+  BRAND_DESCRIPTION: str({
+    default:
+      'A multiplayer design canvas where people and AI agents create side by side. Connect any MCP agent and watch it design live.',
+    desc: 'Meta/OG description of the product',
+  }),
+  BRAND_COLOR: hexColor({
+    default: undefined,
+    desc: 'Brand accent on light surfaces, e.g. #233163; unset = built-in blue',
+  }),
+  BRAND_COLOR_DARK: hexColor({ default: undefined, desc: 'Brand accent on dark surfaces; unset = built-in' }),
+  BRAND_LOGO_URL: str({
+    default: undefined,
+    desc: 'Wordmark/logo for dark surfaces (path or URL); unset = built-in mark',
+  }),
+  BRAND_LOGO_URL_DARK: str({
+    default: undefined,
+    desc: 'Wordmark/logo for light surfaces; falls back to BRAND_LOGO_URL',
+  }),
+  BRAND_AGENT_NAME: str({ default: undefined, desc: 'Resident agent display name; defaults to APP_NAME' }),
+  BRAND_WEBSITE_URL: origin({ default: undefined, desc: 'Marketing site linked from the UI; unset = doop.design' }),
+  BRAND_DOWNLOAD_URL: origin({ default: undefined, desc: 'Desktop download page; unset = doop.design/download' }),
+  BRAND_ASSETS_DIR: str({
+    default: undefined,
+    desc: 'Directory of brand files served at /brand-assets/ and as favicon overrides',
+  }),
+
+  /* -------------------------------------------------- auth methods */
+  EMAIL_PASSWORD_AUTH: bool({
+    default: true,
+    desc: 'When false, email/password sign-in is disabled server-side and hidden on the login screen',
+  }),
 
   /* ------------------------------------------------------ webhooks */
   WEBHOOK_ALLOW_PRIVATE_URLS: bool({ default: false }),

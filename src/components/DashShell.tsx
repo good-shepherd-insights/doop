@@ -126,13 +126,13 @@ export function AccountMenu({
             (initDesktopShell); the desktop app has nothing to download */}
         {!isDesktopShell() && (
           <DropdownMenuItem asChild>
-            <a href={DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+            <a href={DOWNLOAD_URL()} target="_blank" rel="noopener noreferrer">
               <DesktopIcon size="rail" /> {t('shell.desktopApp')}
             </a>
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
-          <a href={WEBSITE_URL} target="_blank" rel="noopener noreferrer">
+          <a href={WEBSITE_URL()} target="_blank" rel="noopener noreferrer">
             <ExportIcon size="rail" /> {t('shell.website')}
           </a>
         </DropdownMenuItem>

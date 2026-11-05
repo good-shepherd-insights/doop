@@ -7,12 +7,12 @@ export const settings = {
   canvas: 'Canvas',
 
   generalTitle: 'General',
-  generalBlurb: 'Make Doop work the way you like in this browser.',
+  generalBlurb: 'Make {brand} work the way you like in this browser.',
   homeDashboardTitle: 'Home dashboard',
   homeDashboardDescription: 'Choose what appears on your home dashboard in this browser.',
   showPromptBox: 'Show Prompt Box',
   showPromptBoxHint: 'Start a design from a prompt on the home dashboard.',
-  agentTitle: 'Doop Agent',
+  agentTitle: '{brandAgent}',
   agentBlurb: 'Which model account the agent runs on, for every canvas you work on.',
   fontsTitle: 'Fonts',
   fontsBlurb: 'Your own fonts, for designing on your personal canvases.',
@@ -25,16 +25,16 @@ export const settings = {
   accountBlurb: 'Who you are on every canvas — and how you get back into this one.',
   appearanceTitle: 'Appearance',
   appearanceBlurb:
-    'How Doop looks in this browser: light or dark, the language it speaks, and how the canvas editor lays out its panels.',
+    'How {brand} looks in this browser: light or dark, the language it speaks, and how the canvas editor lays out its panels.',
 
   agentCardDescription:
-    'Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your desktop. Your provider’s usage limits and charges apply.',
-  freeTasksLeftLabel: 'Free Doop Agent tasks left',
+    'Choose how the {brandAgent} runs on your canvases: a connected model account or Claude CLI on your desktop. Your provider’s usage limits and charges apply.',
+  freeTasksLeftLabel: 'Free {brandAgent} tasks left',
   meterGeminiCloud: 'Gemini cloud pilot selected — connection managed by your operator.',
   meterClaudeLocal: 'Claude CLI selected — runs on your connected desktop.',
   meterChatgpt: 'Running on your ChatGPT subscription.',
   meterProviderKey: 'Running on your {provider} key.',
-  meterNoFreeTasks: 'No free tasks on this server — connect an account to use the Doop Agent.',
+  meterNoFreeTasks: 'No free tasks on this server — connect an account to use the {brandAgent}.',
   meterUsedUp: 'Your free tasks are used up.',
   meterLeft: { one: '{left} of {count} free task left.', other: '{left} of {count} free tasks left.' },
 
@@ -53,7 +53,7 @@ export const settings = {
 
   languageTitle: 'Language',
   languageDescription:
-    'The language Doop’s screens are written in, in this browser. Until you pick one, you see the default this server is set to.',
+    'The language {brand}’s screens are written in, in this browser. Until you pick one, you see the default this server is set to.',
   languageRow: 'Language',
   languageAria: 'Language',
   languagePicked: 'Picked in this browser.',
