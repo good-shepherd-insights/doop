@@ -7,6 +7,7 @@ import { store } from './store.ts'
 import { hasDurableCanvasAccess } from './access.ts'
 import { getTasks } from './actions.ts'
 import { agentActivityState } from '../shared/agentActivity.ts'
+import { brandAgentName } from './branding.ts'
 import { apnsConfigured, sendLiveActivityPush } from './apns.ts'
 
 export const liveActivitiesRouter = Router()
@@ -155,7 +156,7 @@ export async function deliverLiveActivities(send = sendLiveActivityPush) {
     await forEachBounded(rows, DELIVERY_CONCURRENCY, deadline, async (row) => {
       const canvas = store.getCanvas(row.canvasId)
       const permitted = canvas && hasDurableCanvasAccess(row.userId, canvas)
-      const state = permitted ? agentActivityState(canvas.name, getTasks(canvas.id)) : null
+      const state = permitted ? agentActivityState(canvas.name, getTasks(canvas.id), brandAgentName()) : null
       const ended = !state || (state.phase !== 'working' && state.phase !== 'queued')
       // Revocations send no private canvas/task content; then discard the token.
       const content = state ?? {
@@ -223,7 +224,7 @@ async function startLiveActivities(send: typeof sendLiveActivityPush, deadline: 
   await forEachBounded(starters, DELIVERY_CONCURRENCY, deadline, async (device) => {
     for (const canvas of canvases) {
       if (!hasDurableCanvasAccess(device.userId, canvas)) continue
-      const state = agentActivityState(canvas.name, getTasks(canvas.id))
+      const state = agentActivityState(canvas.name, getTasks(canvas.id), brandAgentName())
       if (!state || (state.phase !== 'working' && state.phase !== 'queued')) continue
       const key = `${device.userId}/${canvas.id}`
       if (covered.has(key) || announced.get(`${device.token}/${canvas.id}`) === state.startedAt) continue

@@ -1,5 +1,5 @@
 import { env } from './env.ts'
-import { publicBranding } from './branding.ts'
+import { publicBranding, brandAgentName } from './branding.ts'
 import { brandedIndexHtml, buildId } from './indexHtml.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
@@ -83,7 +83,7 @@ import { AGENT_MODELS } from './openaiAgent.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
 import { ANTHROPIC_MODELS, GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
-import { mentionedRole } from '../shared/agents.ts'
+import { mentionedRole, addRoleAlias, DEFAULT_ROLE_ID } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
@@ -104,6 +104,8 @@ const BUILD_ID = buildId()
 await initDb()
 await backgrounds.initBackgrounds()
 initAuth()
+/* "@Designer" (BRAND_AGENT_NAME) must reach the resident role like "@doop" */
+addRoleAlias(brandAgentName(), DEFAULT_ROLE_ID)
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
 let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {

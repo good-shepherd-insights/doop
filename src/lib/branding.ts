@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { addRoleAlias, DEFAULT_ROLE_ID } from '../../shared/agents'
 
 /**
  * The instance's brand, read once from GET /api/branding (server/branding.ts)
@@ -48,6 +49,8 @@ export function initBranding(): Promise<void> {
     .then(async (res) => {
       if (!res.ok) throw new Error(`branding ${res.status}`)
       current = { ...FALLBACK, ...(await res.json()) }
+      /* "@Designer" mentions resolve to the resident role on this side too */
+      addRoleAlias(current.agentName, DEFAULT_ROLE_ID)
       for (const listener of listeners) listener()
     })
     .catch(() => {

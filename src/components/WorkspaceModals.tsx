@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { WorkspaceDetail, WorkspaceSummary } from '../../shared/types'
-import { ENTERPRISE_CONTACT, formatUsd, seatPerMonth, TEAM_SEAT_PRICE } from '../../shared/billing'
+import { formatUsd, seatPerMonth, TEAM_SEAT_PRICE } from '../../shared/billing'
 import type { BillingInterval, Plan } from '../../shared/billing'
 import { api, errorMessage, paywalledWorkspace, type PlansResponse } from '../lib/api'
 import { authClient } from '../lib/auth'
+import { getBrand } from '../lib/branding'
 import { posthog } from '../lib/posthog'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -240,7 +241,7 @@ export function UpgradeModal({
             {session?.user.email && (
               <p className="mt-3 text-caption text-ink-faint">
                 {t('home.receipts', { email: session.user.email })}{' '}
-                <a className="font-semibold text-ink underline underline-offset-2" href={ENTERPRISE_CONTACT}>
+                <a className="font-semibold text-ink underline underline-offset-2" href={getBrand().websiteUrl}>
                   {t('home.talkToUs')}
                 </a>
                 {t('home.receiptsEnd')}
@@ -298,7 +299,7 @@ function PlanCard({ plan, interval, current }: { plan: Plan; interval: BillingIn
       {plan.id === 'enterprise' && (
         <a
           className="mt-auto flex items-center gap-1 pt-4 text-body font-semibold text-ink underline underline-offset-2"
-          href={ENTERPRISE_CONTACT}
+          href={getBrand().websiteUrl}
         >
           {t('home.contactUs')}
           <ArrowRightIcon size={14} />

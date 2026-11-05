@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api, ApiError } from './api'
+import { getBrand } from './branding'
 import { useStore } from './store'
 import type { LocalAgentJob, LocalAgentPreference, LocalAgentResult } from '../../shared/localAgent'
 
@@ -35,7 +36,7 @@ export const canChooseClaude = () => bridge.__DOOP_CLAUDE_CHOOSE__ === true
 
 export function invokeClaude<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!hasLocalClaude() || !bridge.__TAURI__)
-    return Promise.reject(new Error('Update the Doop desktop app to use local Claude.'))
+    return Promise.reject(new Error(`Update the ${getBrand().name} desktop app to use local Claude.`))
   return bridge.__TAURI__.core.invoke<T>(command, args)
 }
 

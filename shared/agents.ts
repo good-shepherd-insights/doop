@@ -117,6 +117,15 @@ export function roleByAgentName(name: string | undefined): AgentRole | undefined
   return name ? byName.get(name.toLowerCase()) : undefined
 }
 
+/** Registers an extra display name that resolves to a role, so a mention
+ *  written as the branded agent name ("@Designer") reaches the resident role
+ *  exactly like "@doop" does. Each environment registers its own brand name
+ *  once at startup, after the brand config is known. */
+export function addRoleAlias(name: string, roleId: string): void {
+  if (!byId.has(roleId) || !name.trim()) return
+  byName.set(name.trim().toLowerCase(), byId.get(roleId)!)
+}
+
 export function roleName(id: string | undefined): string {
   return roleById(id)?.name ?? roleById(DEFAULT_ROLE_ID)!.name
 }

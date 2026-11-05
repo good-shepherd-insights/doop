@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getBrand } from '../lib/branding'
 import {
   adminApi,
   type AdminAgentFeedback,
@@ -420,7 +421,7 @@ function FeedbackPages({
               <p className="mt-1.5 text-copy whitespace-pre-wrap text-ink">{f.message}</p>
               <MetaLine className="mt-1.5">
                 <span>{f.agentName ?? t('admin.unnamedAgent')}</span>
-                <span>{f.source === 'resident' ? 'Doop Agent' : (f.client ?? 'MCP')}</span>
+                <span>{f.source === 'resident' ? getBrand().agentName : (f.client ?? 'MCP')}</span>
                 {f.user && <span>{f.user.email}</span>}
                 {f.canvasId && <span className="font-mono">{f.canvasId}</span>}
                 <span>{timeAgo(f.at)}</span>

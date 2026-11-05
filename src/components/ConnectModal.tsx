@@ -310,7 +310,7 @@ function agentSteps(
             body: (
               <>
                 {t('connect.chatgptAddBefore')}
-                <strong>Doop</strong>
+                <strong>{getBrand().name}</strong>
                 {t('connect.chatgptAddDescribe')}
                 <strong>OAuth</strong>
                 {t('connect.chatgptAddReview')}

@@ -7,6 +7,8 @@
  * `__DOOP_LOCAL_FONTS__`; browsers and older shells never see the button.
  */
 
+import { getBrand } from './branding'
+
 export interface PickedLocalFont {
   path: string
   name: string
@@ -34,7 +36,7 @@ export const canAddLocalFonts = () => bridge.__DOOP_LOCAL_FONTS__ === true && !!
 
 function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!canAddLocalFonts())
-    return Promise.reject(new Error('Update the Doop desktop app to add fonts from this computer.'))
+    return Promise.reject(new Error(`Update the ${getBrand().name} desktop app to add fonts from this computer.`))
   return bridge.__TAURI__!.core.invoke<T>(command, args)
 }
 
