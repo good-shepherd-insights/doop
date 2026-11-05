@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils'
 import { navigate } from '@/lib/navigate'
 import { useRailDrawer } from '@/lib/railDrawer'
 import { useT } from '@/lib/i18n'
+import { useBrand } from '@/lib/branding'
+import { useTheme } from '@/lib/theme'
 import { Logo } from '../Logo'
 import { IconButton } from './icon-button'
 import { ChevronDownIcon, PanelLeftIcon } from './icons'
@@ -62,19 +64,33 @@ function DashSidebarBrand({
   ...props
 }: React.ComponentProps<'div'> & { onHome?: () => void }) {
   const t = useT()
+  const { logoUrl, logoUrlDark } = useBrand()
+  const { resolved } = useTheme()
+  const logo = resolved === 'dark' ? logoUrl : (logoUrlDark ?? logoUrl)
   return (
     <div
       data-slot="dash-sidebar-brand"
       className={cn('mb-2.5 flex h-[30px] flex-none items-center gap-2 px-1.5', className)}
       {...props}
     >
-      <IconButton
-        aria-label={t('ui.doopHome')}
-        className="size-[26px] rounded-row hover:bg-transparent"
-        onClick={onHome}
-      >
-        <Logo className="size-[26px] rounded-row" />
-      </IconButton>
+      {logo ? (
+        <button
+          type="button"
+          aria-label={t('ui.doopHome')}
+          className="flex min-w-0 flex-none items-center overflow-hidden rounded-row hover:opacity-90"
+          onClick={onHome}
+        >
+          <img src={logo} alt="" className="h-[24px] w-auto max-w-[128px] object-contain" />
+        </button>
+      ) : (
+        <IconButton
+          aria-label={t('ui.doopHome')}
+          className="size-[26px] rounded-row hover:bg-transparent"
+          onClick={onHome}
+        >
+          <Logo className="size-[26px] rounded-row" />
+        </IconButton>
+      )}
       {children}
     </div>
   )

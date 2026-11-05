@@ -1,5 +1,6 @@
 import type { AgentRole } from '../../shared/agents'
 import { useBrand } from '@/lib/branding'
+import { useTheme } from '@/lib/theme'
 import { DoopMark } from './Logo'
 import { cn } from '@/lib/utils'
 
@@ -18,11 +19,13 @@ export function RoleMark({
   className?: string
   style?: React.CSSProperties
 }) {
-  const { markUrl } = useBrand()
-  if (markUrl)
+  const { markUrl, markUrlDark } = useBrand()
+  const { resolved } = useTheme()
+  const url = resolved === 'dark' ? markUrl : (markUrlDark ?? markUrl)
+  if (url)
     return (
       <img
-        src={markUrl}
+        src={url}
         alt=""
         className={cn('flex-none rounded-full object-cover align-middle', className)}
         style={{ width: size, height: size, ...style }}

@@ -29,7 +29,6 @@ import {
   SearchIcon,
   UserIcon,
   UsersIcon,
-  WebIcon,
   WorkflowIcon,
 } from './ui/icons'
 
@@ -256,9 +255,6 @@ export function AppRail({
         <FolderPlusIcon size="rail" />
       </IconButton>
       <Rule />
-      <IconButton aria-label={t('rail.community')} on={active === 'community'} onClick={() => go('/community')}>
-        <WebIcon size="rail" />
-      </IconButton>
       <IconButton aria-label={t('rail.automations')} on={active === 'automations'} onClick={() => go('/automations')}>
         <WorkflowIcon size="rail" />
       </IconButton>
@@ -367,18 +363,6 @@ export function AppRail({
         ))}
         <DashNavItem density="rail" icon={<FolderPlusIcon size="rail" />} onClick={createWorkspace}>
           {spaces.length ? t('rail.newWorkspace') : t('rail.createWorkspace')}
-        </DashNavItem>
-      </nav>
-
-      <DashSectionLabel density="rail">{t('rail.explore')}</DashSectionLabel>
-      <nav className="flex flex-col gap-0.5">
-        <DashNavItem
-          density="rail"
-          icon={<WebIcon size="rail" />}
-          active={active === 'community'}
-          onClick={() => go('/community')}
-        >
-          {t('rail.community')}
         </DashNavItem>
       </nav>
 
