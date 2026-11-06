@@ -2,7 +2,8 @@ import type { ComponentType, ReactNode } from 'react'
 import type { IntegrationsStatus } from '../lib/api'
 import type { MessageKey } from '../lib/i18n'
 import { linearIntegration } from './linear'
-import { slackIntegration } from './slack'
+/* hidden for now — restore to bring the Slack card and import source back */
+// import { slackIntegration } from './slack'
 
 /**
  * Client extensions, the mirror of `server/extensions.ts`: each integration
@@ -64,4 +65,7 @@ export type ClientIntegration =
       }
     })
 
-export const clientIntegrations: ClientIntegration[] = [linearIntegration, slackIntegration]
+export const clientIntegrations: ClientIntegration[] = [
+  linearIntegration,
+  // slackIntegration, // hidden for now
+]

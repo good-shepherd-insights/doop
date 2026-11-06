@@ -106,7 +106,7 @@ async function resolvePublicNetworkUrl(raw: string | URL): Promise<ResolvedPubli
   const literalFamily = net.isIP(host)
   const addresses: PublicAddress[] = literalFamily
     ? [{ address: host, family: literalFamily as 4 | 6 }]
-    : ((await dns.lookup(host, { all: true, verbatim: true })) as PublicAddress[])
+    : ((await dns.lookup(host, { all: true, verbatim: false })) as PublicAddress[]).sort((a, b) => a.family - b.family)
   if (addresses.length === 0 || addresses.some(({ address }) => isPrivateIp(address))) {
     throw new Error('that host is not reachable from here')
   }

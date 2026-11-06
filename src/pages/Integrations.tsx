@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import type { CanvasMeta } from '../../shared/types'
-import type { Automation } from '../../shared/automations'
+// meta hidden for now — restore with the Meta card below
+// import type { Automation } from '../../shared/automations'
 import { api, type IntegrationsStatus } from '../lib/api'
 import { posthog } from '../lib/posthog'
-import { connectIntegration } from '../lib/integrationConnect'
-import { MetaTile } from '../components/AutomateShell'
+// meta hidden for now — restore with the Meta card below
+// import { connectIntegration } from '../lib/integrationConnect'
+// import { MetaTile } from '../components/AutomateShell'
 import { AppRail, railLayout } from '../components/AppRail'
 import { clientIntegrations } from '../integrations'
-import { DisconnectButton, IntegrationCard } from '../integrations/ui'
-import { Button } from '../components/ui/button'
+// import { DisconnectButton, IntegrationCard } from '../integrations/ui'
+// import { Button } from '../components/ui/button'
 import { Callout } from '../components/ui/callout'
 import { Skeleton } from '../components/ui/skeleton'
 import { Toast } from '../components/ui/toast'
@@ -41,12 +43,13 @@ export function Integrations() {
   const t = useT()
   const [status, setStatus] = useState<IntegrationsStatus | null>(null)
   const [canvases, setCanvases] = useState<CanvasMeta[]>([])
-  const [automations, setAutomations] = useState<Automation[]>([])
+  // const [automations, setAutomations] = useState<Automation[]>([])
   const [busy, setBusy] = useState(false)
   const [confirmDisconnect, setConfirmDisconnect] = useState<Disconnectable | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  /* read once: the warning is about the week ahead, not this render */
-  const [soon] = useState(() => Date.now() + 7 * 86_400_000)
+  /* read once: the warning is about the week ahead, not this render —
+     meta hidden for now, restore with the Meta card below */
+  // const [soon] = useState(() => Date.now() + 7 * 86_400_000)
   /* read once (initialisers run twice under StrictMode, so the URL is
      cleaned in an effect, not here) */
   const [notice] = useState(readNotice)
@@ -54,7 +57,7 @@ export function Integrations() {
   useEffect(() => {
     api.integrations().then(setStatus).catch(console.error)
     api.listCanvases().then(setCanvases).catch(console.error)
-    api.listAutomations().then(setAutomations).catch(console.error)
+    // api.listAutomations().then(setAutomations).catch(console.error)
     if (notice) history.replaceState(null, '', location.pathname)
   }, [notice])
 
@@ -63,21 +66,22 @@ export function Integrations() {
     window.setTimeout(() => setToast(null), 2400)
   }
 
-  /** Leave for Meta's consent screen. */
-  async function connectMeta() {
-    if (busy) return
-    setBusy(true)
-    try {
-      const destination = await connectIntegration('meta', () =>
-        posthog.capture('integration_connect_started', { provider: 'meta' }),
-      )
-      if (destination === 'browser') setBusy(false)
-    } catch (error) {
-      console.error(error)
-      showToast(t('automations.metaStartFailed'))
-      setBusy(false)
-    }
-  }
+  /* meta hidden for now — restore with the Meta card below */
+  // /** Leave for Meta's consent screen. */
+  // async function connectMeta() {
+  //   if (busy) return
+  //   setBusy(true)
+  //   try {
+  //     const destination = await connectIntegration('meta', () =>
+  //       posthog.capture('integration_connect_started', { provider: 'meta' }),
+  //     )
+  //     if (destination === 'browser') setBusy(false)
+  //   } catch (error) {
+  //     console.error(error)
+  //     showToast(t('automations.metaStartFailed'))
+  //     setBusy(false)
+  //   }
+  // }
 
   function requestDisconnect(target: Disconnectable, provider: string) {
     setConfirmDisconnect({
@@ -102,8 +106,8 @@ export function Integrations() {
     }
   }
 
-  const meta = status?.meta
-  const usedBy = automations.filter((a) => a.steps.some((s) => s.type === 'pull')).length
+  // const meta = status?.meta
+  // const usedBy = automations.filter((a) => a.steps.some((s) => s.type === 'pull')).length
 
   return (
     <DashLayout className={railLayout}>
@@ -123,7 +127,7 @@ export function Integrations() {
           )}
 
           <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {!meta || !status ? (
+            {!status ? (
               <>
                 <Skeleton shape="card" />
                 <Skeleton shape="card" />
@@ -151,6 +155,8 @@ export function Integrations() {
                   />
                 ))}
 
+                {/* meta hidden for now — restore this card, connectMeta, and the
+                    commented imports/binding above to bring it back
                 <IntegrationCard
                   tile={<MetaTile size={36} />}
                   name="Meta Ads"
@@ -212,6 +218,7 @@ export function Integrations() {
                   )}
                   {!meta.enabled && <p className="text-caption text-ink-faint">{t('automations.metaNotConfigured')}</p>}
                 </IntegrationCard>
+                */}
               </>
             )}
           </div>
