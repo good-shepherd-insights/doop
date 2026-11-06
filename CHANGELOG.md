@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/good-shepherd-insights/doop/compare/v0.13.0...v0.14.0) (2026-11-06)
+
+
+### Features
+
+* **agent:** connect every model provider at once and pick one per task ([#413](https://github.com/good-shepherd-insights/doop/issues/413)) ([62ee341](https://github.com/good-shepherd-insights/doop/commit/62ee341b2404f07066818c1cf8c6f242f30a8f36))
+* **rail:** open workspace settings under the workspace row ([#421](https://github.com/good-shepherd-insights/doop/issues/421)) ([01584b3](https://github.com/good-shepherd-insights/doop/commit/01584b34f6cadcf21767127280cc6e320a6d748a))
+* **share:** let signed-out visitors view link-shared canvases ([#416](https://github.com/good-shepherd-insights/doop/issues/416)) ([5bc5b75](https://github.com/good-shepherd-insights/doop/commit/5bc5b75cdee536b1c179d839ea6779d023a546ac))
+* **ui:** redesign import, export and Connect AI modals as app-icon lists ([#417](https://github.com/good-shepherd-insights/doop/issues/417)) ([d9e6ee0](https://github.com/good-shepherd-insights/doop/commit/d9e6ee00b5d6db04e0d6ad2dc5fbe2268ab7d803))
+
+
+### Bug Fixes
+
+* **canvas:** drop the frame border, soft hover ring and canvas grey ([#415](https://github.com/good-shepherd-insights/doop/issues/415)) ([86d12a7](https://github.com/good-shepherd-insights/doop/commit/86d12a7b62215c1d6673a5163464a94709a9a30f))
+* **canvas:** keep the pointer visible while space pans in Safari ([#420](https://github.com/good-shepherd-insights/doop/issues/420)) ([801e536](https://github.com/good-shepherd-insights/doop/commit/801e5366bb62077ec6fbb863755899019a095dac))
+* **canvas:** pan without selecting or pressing panel UI, and an open lock on unlocked layers ([#411](https://github.com/good-shepherd-insights/doop/issues/411)) ([5b55c12](https://github.com/good-shepherd-insights/doop/commit/5b55c12954526e0fa95060f833e4cab512320f1f))
+* **mcp:** let Claude pick the preview card's sandbox origin ([#419](https://github.com/good-shepherd-insights/doop/issues/419)) ([8ceb812](https://github.com/good-shepherd-insights/doop/commit/8ceb81216ba7c8ae694767861e59fc4911dd0655))
+* **pdf:** print each frame in a frame-sized iframe so no content is dropped ([#409](https://github.com/good-shepherd-insights/doop/issues/409)) ([4358fb6](https://github.com/good-shepherd-insights/doop/commit/4358fb66a9445422e17f154b99366f0617b9e087))
+
 ## [0.13.0](https://github.com/kgoedecke/doop/compare/v0.12.0...v0.13.0) (2026-11-04)
 
 
