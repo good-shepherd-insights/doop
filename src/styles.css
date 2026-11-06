@@ -908,7 +908,8 @@ body:has([data-panel-resizing]) * {
 }
 .hero-wave > i {
   flex: 1;
-  background: linear-gradient(180deg, #ff3ea5, #ff6a00 28%, #ffd400 46%, #fffdf2, #8ec9ff 78%, #0644e8);
+  /* Vision School brand: navy family with the #d1fe3e lime accent */
+  background: linear-gradient(180deg, #233163, #8fa7dd 28%, #d1fe3e 46%, #fffdf2, #5a787c 78%, #233163);
   transform-origin: bottom;
   animation: wave-swell 6s ease-in-out infinite;
 }
