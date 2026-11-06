@@ -76,6 +76,7 @@ import {
   LayoutTemplate,
   Link2,
   Lock,
+  LockOpen,
   LogOut,
   Menu,
   Minus,
@@ -122,6 +123,7 @@ import {
   User,
   Users,
   Workflow,
+  Server,
   Flag,
   MousePointerClick,
   SquareMousePointer,
@@ -283,6 +285,7 @@ export const BrainIcon = icon(Brain)
 export const BuildingIcon = icon(Building2)
 export const CreditCardIcon = icon(CreditCard)
 export const LockIcon = icon(Lock)
+export const LockOpenIcon = icon(LockOpen)
 export const DesktopIcon = icon(Monitor)
 export const DownloadIcon = icon(Download)
 export const PuzzleIcon = icon(Puzzle)
@@ -321,6 +324,7 @@ export const ShareUpIcon = icon(Share)
 export const FolderPlusIcon = icon(FolderPlus)
 /** automations: two linked steps */
 export const WorkflowIcon = icon(Workflow)
+export const ServerIcon = icon(Server)
 /** integrations: building blocks */
 export const BlocksIcon = icon(Blocks)
 /** connect an agent: a plus in a ring */

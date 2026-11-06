@@ -85,10 +85,43 @@
   its curated roster (the run-time vision check knows only the roster's flags).
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
-  high / xhigh), set through `PATCH /api/model-account { effort }`, read by `effortFor` in
+  high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+- Connections and the default (`server/agentDefaults.ts`, `server/modelAccounts.ts`): a person can
+  connect every provider at once, one `model_accounts` row per user and kind (composite key and an
+  `enabled` flag, migration 0046), plus the Claude Plan on their desktop (`local_agent_preferences`,
+  whose `enabled` is the Plan's on/off). Settings → Doop Agent (`ConnectionTable.tsx`) is grouped
+  lists: "Connected" (provider tile, name with a Default or Off badge, a short line, then the model
+  dropdown with the effort as a `StepSlider`, the on/off switch and a "…" menu: Make default,
+  Replace key (a modal) or Claude Code settings (a modal: which CLI, a pinned model), Disconnect),
+  "Add an agent" (every provider not connected, each with Connect; the one being connected shows
+  its key field or sign-in under it) and "Image model" (`ImageModelCard.tsx`, a pickable list);
+  `agent_defaults`
+  stores the marked provider (`PUT /api/agent-runners/default`, connected and on only).
+  `resolveDefault` passes over a mark on a connection that is gone or off, then falls back to the
+  Plan while on, then the account
+  connected first that is on. Account routes are per kind (`/api/model-account/:kind` takes
+  `PATCH` and `DELETE`; `GET /api/model-account/models?kind=`) and every one answers with
+  the whole view (`accountsView`: every account on or off, the default, the menus). The meter
+  counts any connection that is on and names the default; image generation uses the enabled
+  account matching the image provider (ChatGPT before an OpenAI key), server keys only for
+  someone who connected none (switching every account off does not count). Tests: `anthropicAccount.test.ts` (end to end), `defaultRouting.test.ts`,
+  `agentRunners.test.ts`, `chatgptProviderSwitch.test.tsx`, `localClaudeConnection.test.tsx`.
+- Which connection runs a task (`shared/agentRunner.ts`, `server/agentRunners.ts`):
+  `GET /api/agent-runners` lists every connection that is on, with its menus, plus `default`.
+  The composer's `ModelPicker` offers each one and its models; the pick is this browser's
+  (`src/lib/runnerPick.ts`, `doop:agent-runner`), rides on the card as `runner` (a `RunnerPick`:
+  provider, model, effort; `tasks.runner` JSON, migration 0045) and the send button's meter names
+  it. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
+  model the provider does not know runs on the connection's configured one, and anything else
+  runs on the default. One resident run claims work that agrees on the pick (`actions.nextWork`,
+  the `runner` filter on the take functions): comments and automations carry none and run on
+  the default, feedback runs on what its task ran on (kept on the feedback, `feedback.runner`,
+  migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
+  `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
+  `localAgentRouting.test.ts`.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
@@ -195,7 +228,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
   `frameExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
-  each frame onto a page of its own size, pages in the order the frames are listed (a whole page
+  each frame onto a page of its own size (inside an iframe of the frame's size, as the canvas shows
+  it, so content taller than the frame is clipped rather than paginated: bare, Chrome moved a block
+  straddling the edge whole onto a dropped second sheet), pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
   order); render limits in `shared/pdfLimits.ts`, which also sizes the browser's download
   timeout; served by `GET /api/canvases/:id/export.pdf` and MCP `export_frame`.
@@ -600,12 +635,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Import makes a canvas and opens it with `?import=1`, which `CanvasPage` turns into the import
   picker. `GET /api/canvases` adds `people` (owner, then members) for the tiles' avatar stacks.
   The rail is `src/components/AppRail.tsx`, mounted by Home, Automations, Integrations, Community,
-  Workspace and Admin alike (a page's own group, such as a workspace's panes, goes in as children;
+  Workspace and Admin alike (a page's own group, such as the admin indexes, goes in as children;
   Settings draws its own rail from the same `ui/dash.tsx` parts); it owns
   the ⌘K search palette (`CanvasSearchModal.tsx`), the connect-an-agent modal, the collapsed
   narrow state (remembered in `localStorage` under `doop-rail`) and the account face at the bottom.
   From another page the rail sends scope picks home as `/?scope=` and new workspaces as
-  `/?workspace=new`.
+  `/?workspace=new`. The workspace in view opens under its row: All canvases, People, Fonts, and
+  for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
+  they switch its pane in place, elsewhere they go to `/w/<id>?pane=…`, and the page keeps the
+  pane in its URL. The rail keeps the last lists it drew (`lastLists`), so a page change does not
+  blink its rows out, and fades only when collapsed or expanded. Home warms the Workspace page's
+  detail while a workspace's canvases are in view (`src/lib/workspaceCache.ts`), so its panes draw on
+  the first frame instead of a skeleton; the page refetches on arrival.
 
 ## 11. Developer Experience Tooling
 

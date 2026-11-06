@@ -180,10 +180,8 @@ export const panels = {
   promptSend: 'Send',
   promptSent: 'The Doop Agent is on it — watch the canvas',
 
-  modelFallback: 'Model',
   modelAria: 'Model: {label}',
-  modelCaption: 'Doop Agent model',
-  modelNoAccount: 'No model account connected — the Doop Agent runs on the server’s model when one is set up.',
+  modelNoAccount: 'Nothing connected yet — the Doop Agent runs on the server’s model when one is set up.',
   modelSettings: 'Model settings…',
   modelConnect: 'Connect a model…',
 
@@ -238,8 +236,7 @@ export const panels = {
   exportNothing: 'Nothing to export yet',
   exportNothingLede: 'Add a frame to this page first.',
   exportPdfTitle: 'Export as PDF',
-  exportPdfLede:
-    'The frames you check become one PDF, a vector page per frame at its own size, in the order below: top to bottom, then left to right on the canvas.',
+  exportPdfLede: 'One vector page per frame, at its own size, in the order below.',
   exportSelectAll: 'Select all',
   exportClear: 'Clear',
   exportFramesAria: 'Frames to export',
@@ -267,7 +264,9 @@ export const panels = {
   frameExportTitle: 'Export “{name}”',
   frameExportLede: 'Download this frame as a PNG or JPG image, or as a vector PDF.',
   frameExportPng: 'Download PNG',
+  frameExportPngHint: 'Lossless image at 2x',
   frameExportJpg: 'Download JPG',
+  frameExportJpgHint: 'Compressed image at 2x, a smaller file',
   frameExportPdfGroup: { one: 'Download PDF of {count} frame', other: 'Download PDF of {count} frames' },
   frameExportPdfGroupHint: 'One vector page per frame, top to bottom then left to right',
   frameExportPdfHint: 'Vector page the size of the frame, text stays selectable',

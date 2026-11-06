@@ -180,11 +180,8 @@ export const panels: Catalog['panels'] = {
   promptSend: 'Enviar',
   promptSent: 'O Doop Agent já está nisso — acompanhe o canvas',
 
-  modelFallback: 'Modelo',
   modelAria: 'Modelo: {label}',
-  modelCaption: 'Modelo do Doop Agent',
-  modelNoAccount:
-    'Nenhuma conta de modelo conectada — o Doop Agent usa o modelo do servidor quando houver um configurado.',
+  modelNoAccount: 'Nada conectado ainda — o Doop Agent usa o modelo do servidor quando houver um configurado.',
   modelSettings: 'Configurações do modelo…',
   modelConnect: 'Conectar um modelo…',
 
@@ -240,8 +237,7 @@ export const panels: Catalog['panels'] = {
   exportNothing: 'Nada para exportar ainda',
   exportNothingLede: 'Adicione um frame a esta página primeiro.',
   exportPdfTitle: 'Exportar como PDF',
-  exportPdfLede:
-    'Os frames marcados viram um único PDF, uma página vetorial por frame no tamanho dele, na ordem abaixo: de cima para baixo e depois da esquerda para a direita no canvas.',
+  exportPdfLede: 'Uma página vetorial por frame, no tamanho dele, na ordem abaixo.',
   exportSelectAll: 'Selecionar tudo',
   exportClear: 'Limpar',
   exportFramesAria: 'Frames para exportar',
@@ -269,7 +265,9 @@ export const panels: Catalog['panels'] = {
   frameExportTitle: 'Exportar “{name}”',
   frameExportLede: 'Baixe este frame como imagem PNG ou JPG, ou como PDF vetorial.',
   frameExportPng: 'Baixar PNG',
+  frameExportPngHint: 'Imagem sem perdas em 2x',
   frameExportJpg: 'Baixar JPG',
+  frameExportJpgHint: 'Imagem comprimida em 2x, um arquivo menor',
   frameExportPdfGroup: { one: 'Baixar PDF de {count} frame', other: 'Baixar PDF de {count} frames' },
   frameExportPdfGroupHint: 'Uma página vetorial por frame, de cima para baixo e depois da esquerda para a direita',
   frameExportPdfHint: 'Página vetorial do tamanho do frame, com texto selecionável',
