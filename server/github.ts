@@ -228,6 +228,22 @@ export function detectScreens(paths: string[], pkg: Record<string, unknown> | nu
   const screens: RepoScreen[] = []
   const seenRoutes = new Set<string>()
 
+  /* Plain HTML anywhere (marketing pages, committed dist/ output) lands
+     FIRST: raw files import as-is with no model, so they must never be
+     crowded out of MAX_SCREENS by framework placeholders. */
+  for (const p of paths) {
+    if (p.includes('node_modules/') || p.includes('coverage/')) continue
+    if (!/\.html?$/.test(p)) continue
+    screens.push({
+      kind: 'static',
+      route: '/' + p,
+      sourcePath: p,
+      title: titleFromRoute(p),
+      dynamic: false,
+      source: 'static',
+    })
+  }
+
   const addPage = (route: string, sourcePath: string) => {
     const clean = route.replace(/\/{2,}/g, '/').replace(/(.)\/$/, '$1') || '/'
     if (seenRoutes.has(clean)) return
@@ -296,20 +312,6 @@ export function detectScreens(paths: string[], pkg: Record<string, unknown> | nu
     if (/\.(stories|test|spec)\./.test(p)) continue
     components++
     screens.push({ kind: 'component', route: p, sourcePath: p, title: m[1]!, dynamic: false, source: 'placeholder' })
-  }
-
-  /* Plain HTML anywhere (marketing pages, committed dist/ output) */
-  for (const p of paths) {
-    if (p.includes('node_modules/') || p.includes('coverage/')) continue
-    if (!/\.html?$/.test(p)) continue
-    screens.push({
-      kind: 'static',
-      route: '/' + p,
-      sourcePath: p,
-      title: titleFromRoute(p),
-      dynamic: false,
-      source: 'static',
-    })
   }
 
   return screens.slice(0, MAX_SCREENS)
@@ -468,7 +470,8 @@ export function wrapGeneratedHtml(
 /* ------------------------------------------------------------------ */
 /* Import + resync                                                     */
 
-const MAX_IMPORT_SCREENS = 40
+const MAX_MODEL_SCREENS = 40
+const MAX_BATCH_SCREENS = 1000
 
 /** A screen's identity across analyze → import → resync. */
 function screenIdentity(s: { kind: string; route: string; sourcePath: string }): string {
@@ -484,7 +487,7 @@ function screenIdentity(s: { kind: string; route: string; sourcePath: string }):
 export function matchSelection(manifest: RepoScreen[], raw: unknown): { screens: RepoScreen[]; rejected: string[] } {
   if (!Array.isArray(raw)) throw new Error('screens must be an array')
   if (!raw.length) throw new Error('select at least one screen')
-  if (raw.length > MAX_IMPORT_SCREENS) throw new Error(`an import is limited to ${MAX_IMPORT_SCREENS} screens`)
+  if (raw.length > MAX_BATCH_SCREENS) throw new Error(`an import is limited to ${MAX_BATCH_SCREENS} screens`)
   const byIdentity = new Map(manifest.map((s) => [screenIdentity(s), s]))
   const screens: RepoScreen[] = []
   const rejected: string[] = []
@@ -502,6 +505,13 @@ export function matchSelection(manifest: RepoScreen[], raw: unknown): { screens:
     if (screen) screens.push(screen)
     else rejected.push(String(route ?? sourcePath ?? 'unknown'))
   }
+  /* Static HTML screens are one fetch + one frame write — cheap in bulk.
+     Code screens each cost a full model run, so they keep the 40 cap. */
+  const modelScreens = screens.filter((s) => s.source !== 'static').length
+  if (modelScreens > MAX_MODEL_SCREENS)
+    throw new Error(
+      `an import is limited to ${MAX_MODEL_SCREENS} code screens per batch — static HTML screens are not limited`,
+    )
   return { screens, rejected }
 }
 

@@ -75,9 +75,9 @@ describe('screen enumeration', () => {
       null,
     )
     expect(screens.map((s) => [s.kind, s.sourcePath])).toEqual([
-      ['story', 'src/Button.stories.tsx'],
       ['static', 'public/landing.html'],
       ['static', 'dist/index.html'],
+      ['story', 'src/Button.stories.tsx'],
     ])
     expect(screens.every((s) => (s.kind === 'static' ? s.source === 'static' : s.source === 'placeholder'))).toBe(true)
   })

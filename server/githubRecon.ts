@@ -1,5 +1,6 @@
 import { brandAgentName, brandName } from './branding.ts'
 import { env } from './env.ts'
+import { openIsolatedPage } from './screenshot.ts'
 import { ModelAuthError, ModelUnavailableError, type AgentModel } from './agentModel.ts'
 import type { TurnBlock } from './openaiAgent.ts'
 import { createAsset } from './assets.ts'
@@ -374,7 +375,9 @@ export async function resolveRepoAssets(conn: GithubConnection, html: string, pa
 
 const PAGE_W = 1280
 const COMPONENT_W = 640
+const STATIC_W = 1440
 const STATIC_H = 900
+const STATIC_MAX_H = 20_000
 const GAP = 80
 /** how wide a repo's import grid grows before a new row starts */
 const ROW_WIDTH = 3200
@@ -545,6 +548,29 @@ export async function runRepoCards(
   }
 }
 
+/** Render a static screen at STATIC_W and measure its real document height,
+ *  so imported frames are sized to their content instead of a fixed 900px.
+ *  Falls back to STATIC_H when no Chromium is available (e.g. minimal
+ *  self-hosts) — the frame is then resized by hand. */
+async function measureStaticHeight(html: string): Promise<number> {
+  try {
+    const isolated = await openIsolatedPage()
+    const { page, close } = isolated
+    try {
+      await page.setViewport({ width: STATIC_W, height: 900 })
+      await page.setContent(html, { waitUntil: 'load', timeout: 15_000 })
+      const height = await page.evaluate(() =>
+        Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0),
+      )
+      return Math.min(Math.max(Math.round(height), 400), STATIC_MAX_H)
+    } finally {
+      await close()
+    }
+  } catch {
+    return STATIC_H
+  }
+}
+
 /** Land one frame for a screen at the connection's next grid slot. */
 function placeRepoFrame(
   canvasId: string,
@@ -575,7 +601,7 @@ async function sketchScreen(
 ): Promise<void> {
   if (screen.source === 'static') {
     const html = wrapRepoHtml(await fetchRepoFile(conn, screen.sourcePath), conn, screen)
-    placeRepoFrame(canvasId, conn, screen, html, PAGE_W, STATIC_H, actor)
+    placeRepoFrame(canvasId, conn, screen, html, STATIC_W, await measureStaticHeight(html), actor)
     return
   }
 
