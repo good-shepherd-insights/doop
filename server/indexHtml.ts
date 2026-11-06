@@ -23,7 +23,11 @@ function brandColorStyle(): string {
   const light = env.BRAND_COLOR
   const dark = env.BRAND_COLOR_DARK
   if (!light && !dark) return ''
-  const rules = [light ? `:root{--brand:${light}}` : '', dark ? `.dark{--brand:${dark}}` : ''].filter(Boolean)
+  /* html:root wins over the stylesheet's plain :root regardless of load order */
+  const rules = [
+    light ? `html:root{--brand:${light} !important}` : '',
+    dark ? `html.dark{--brand:${dark} !important}` : '',
+  ].filter(Boolean)
   return `<style id="brand-colors">${rules.join('')}</style>`
 }
 
