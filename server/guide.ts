@@ -234,8 +234,11 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - Pages: a canvas is a set of pages, each its own board, listed by get_canvas with every
   frame's pageId. Put one screen in a frame and a body of work on a page: a second product
   surface, a platform (web vs. mobile), a round of explorations. create_canvas_page adds one
-  and returns its id for create_frame's pageId; get_canvas with page_id reads one page; a
-  frame moves between pages with update_frame; set_canvas_pages renames, reorders or deletes.
+  and returns its id for create_frame's pageId; get_canvas with page_id reads one page;
+  set_canvas_pages renames, reorders or deletes pages.
+- Rearranging: update_frame is one call for a frame's name, x/y, size, lock, or its page
+  (pageId; it keeps its x/y unless you pass new ones). Move a frame with it; never recreate
+  or copy a frame's HTML to move it, which loses its comments, versions and approval.
 
 ## GitHub-imported frames — the repo is the source of truth
 
@@ -444,4 +447,19 @@ PDF; pages follow the order given (frame_id first, then frame_ids as listed).
   counts as being asked).
 - Put new work in new frames beside existing ones; omit x/y to auto-place.
 - Keep the SAME agent_name for your whole session. It is your identity in the room.
+
+## Problems with Doop itself — report_issue and share_feedback
+
+Two tools reach the Doop team, never the humans on the canvas, and change no canvas:
+
+- report_issue — Doop got in your way: a tool errored or did something other than its
+  description says, this guide or a tool description left you guessing, a capability you
+  needed was missing, or you had to invent a workaround. Call it after a retry fails, when
+  you fall back to a workaround, or when you give up on part of a task, then carry on.
+  Say what you tried (tool and arguments in brief), what happened and what you expected.
+- share_feedback — what would make Doop better for agents (a tool you wish existed, a
+  result field that would have saved calls, a clumsy workflow) or something that worked
+  well and should stay.
+
+Never include secrets. A human's design feedback is not this: record that with save_decision.
 `
