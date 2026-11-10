@@ -34,6 +34,7 @@ import { DEFAULT_ROLE_ID } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
+import { PixelGrid } from './PixelGrid'
 import { FRAME_COMMENT_SELECTOR, isElementComment, isFrameComment, elementCommentPosition } from '../../shared/comments'
 import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
@@ -1675,7 +1676,11 @@ export const FrameView = memo(function FrameView({
             ref={surfaceRef}
             className={cn(
               'absolute inset-0 overflow-hidden',
-              isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white',
+              /* the white a design without a background sits on, one screen
+                 pixel in from the edge: painted to the edge, it showed past the
+                 scaled iframe's antialiased edge as a light seam */
+              !isCanvasElement(frame.html) &&
+                "before:absolute before:inset-[calc(1px/var(--zoom,1))] before:bg-white before:content-['']",
               /* Select keeps the arrow, like Figma: the frame is a thing to
                  point at, not a handle. The Hand tool's grab and the Comment
                  tool's bubble come from the Stage, which overrides every
@@ -1737,7 +1742,7 @@ export const FrameView = memo(function FrameView({
           >
             <iframe
               ref={iframeRef}
-              className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
+              className="relative block border-none bg-transparent"
               title={frame.name}
               data-doop-frame=""
               sandbox="allow-scripts"
@@ -1765,6 +1770,8 @@ export const FrameView = memo(function FrameView({
                 ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
               }}
             />
+            {/* a standalone element is see-through: the paper's grid shows */}
+            {!isCanvasElement(frame.html) && <PixelGrid layoutZoom={layoutZoom} />}
             {!frame.html && (
               <div className="absolute inset-0 grid place-items-center bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)] text-[13px] text-ink-faint">
                 empty frame — add HTML

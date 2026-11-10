@@ -81,14 +81,36 @@
   catalog, `CHATGPT_MODELS_URL`, asked with the account's token as Codex CLI
   `CHATGPT_CODEX_CLIENT_VERSION`; the route refreshes the token first) have loaders, each with a
   family filter for reasoning chat models with tools, images and a 16k output window; a picked id
-  only has to be shaped like the provider's, and the run is the final check. OpenRouter stays on
-  its curated roster (the run-time vision check knows only the roster's flags).
+  only has to be shaped like the provider's, and the run is the final check. OpenRouter, DeepSeek,
+  Kimi and Kimi Code stay on their curated rosters (the run-time vision check knows only the roster's flags).
+- DeepSeek and Kimi keys (`deepseek-key`, `kimi-key`) and the Kimi Code plan (`kimi-code`, a
+  Kimi membership's key, sent with a `Doop/<version>` User-Agent as Kimi Code's terms require)
+  run on the Chat Completions transport (`server/chatCompletionsAgent.ts`) against fixed URLs
+  (`DEEPSEEK_CHAT_URL`, `KIMI_CHAT_URL`, `KIMI_CODE_CHAT_URL`, an operator's override only). Both refuse a tool-calling conversation that drops an earlier turn's
+  `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
+  sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
+  `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
   high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+- Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
+  `shared/imageDescriptions.ts`): raster uploads emit `asset.stored` and get an asynchronous
+  description. Billing resolves uploader → eligible canvas owner → server; Off on either
+  person stops analysis, and a server-only uploader bypasses both accounts. The stable uploader
+  ID is `assets.owner_id`; migration 0050 persists `describe_payer_id` and `describe_provider`
+  before work so retries never change payer. Runtime errors do not trigger billing fallback.
+  The in-memory queue defaults to two concurrent jobs, three attempts 30s apart, and 200
+  attempts per canvas per UTC day (counter resets on restart). A 20s deadline bounds storage,
+  resizing and model work. Deleted canvases are skipped. Startup recovers unfinished assets;
+  migration 0050 excludes pre-feature history. Settings uses `image_description_prefs` and
+  `GET`/`PUT /api/image-descriptions`. Agents read `images` on frame summaries and in resident
+  kickoff; only standalone image layers are marked pasted references. Success broadcasts
+  `asset:described` without changing frame HTML. Tests: `imageDescriptions.test.ts`,
+  `describerModels.test.ts`, `imageDescriptionsMcp.test.ts`, `imageDescriptionsHttp.test.ts`,
+  `imageDescriptionsCard.test.tsx`.
 - Connections and the default (`server/agentDefaults.ts`, `server/modelAccounts.ts`): a person can
   connect every provider at once, one `model_accounts` row per user and kind (composite key and an
   `enabled` flag, migration 0046), plus the Claude Plan on their desktop (`local_agent_preferences`,
@@ -162,7 +184,7 @@
   switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
   frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs, and a
   token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
-  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0044); REST under
+  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
   `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
   markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
   `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
@@ -264,6 +286,26 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - `@electric-sql/pglite` 0.5.4 - embedded Postgres so `bun run dev` works with zero external
   services.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
+- Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
+  and frame, but frame HTML (most of the data) loads per canvas. Boot reads `frames` without `html`;
+  `store.load(canvasId)` reads one canvas's (concurrent calls share the read) and `evictIdle` drops
+  it after `CANVAS_IDLE_MS` (10 min) unused, never while a room, an MCP agent's presence, a stream,
+  a `store.hold` or an unsaved frame is on it (`persist.frameWritePending`: dirty from a save until
+  a write at that state succeeds, so a debounce, a write in flight and a failed write all count; the
+  sweep retries a failed one). Entry points load and hold for their length, and the rest stays
+  synchronous: the REST middleware for `/api/canvases/:id`, `/api/frames/:id` and
+  `/api/comments/:id` (behind the session gate, held until the response closes), the room `join`,
+  every MCP tool naming `canvas_id`, `frame_id` or `frame_ids` (`server/toolLoads.ts` wraps
+  `registerTool`), resident sweeps and automation pulls, ingest, the local and Gemini agent
+  endpoints. `/i/` renders
+  read the one frame's HTML (`store.renderableFrame`) instead of loading its canvas. Reading an
+  unloaded frame's `html` throws `FrameHtmlNotLoadedError` and starts loading that canvas, so a
+  missed entry point fails loudly rather than seeing an empty design; assigning it always works. The
+  boot asset-ref reconcile pages through Postgres. Context: by 2026-11-09 frame HTML was 6.4 GB on
+  disk and ~11.7 GB of V8 heap (60% of frames hold a non-Latin-1 character, which makes V8 store
+  the whole string at two bytes a character), against a 12 GB heap cap. Tests:
+  `lazyFrameHtml.test.ts`, `lazyFrameHtmlHttp.test.ts` (a restart, then REST, the room, MCP and an
+  idle drop).
 - Automations (`shared/automations.ts`, `server/automations.ts`) support schedules and
   approval triggers scoped to one canvas. The five-second worker groups up to ten signed-off
   frames per run. `automation_approvals` retains dispatch receipts independently of the
@@ -291,7 +333,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   float32 whose inverse multiplies back to exactly 1, since engines multiply zoom in float32.
   WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
   scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the
-  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%). Frame
+  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%): the
+  Stage draws it over the bare paper, under the world, and each frame draws its own over its
+  document and under its chrome (`PixelGrid.tsx`, faded by `--pixel-grid`), so pins, threads,
+  grips, cursors and guides stay above it. Tests: `pixelGridBrowser.test.ts`. Frame
   names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every
   zoom and stack with their own frame (a later frame covers an earlier frame's name, never the
   reverse). The selected frame's size badge lives in a screen-space layer (`FrameLabelLayer`),
@@ -302,8 +347,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - View options (`src/lib/viewOptions.ts`, per browser under `doop:view-options`): the zoom pill's
   menu opens on a field for a typed level (`150`, `150%`; `parseZoomPercent`) and switches the
   pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
-  by `code` (`viewOptionForKey`). Hidden pins still show under the Comment tool and for a thread
-  that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
+  by `code` (registry actions `pixel-grid`, `comments`, `cursors`). Hidden pins still show under
+  the Comment tool and for a thread that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
@@ -349,6 +394,36 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
   something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
   read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
+- Canvas commands (`src/lib/actions/`): every editor command is one entry in `registry.ts` (id,
+  label key in the `actions` catalog, menu and section, chords, `edit`, `enabled`, `checked`,
+  `run`), and the keyboard (`dispatchActionKey`, called first by `CanvasPage`'s keydown), the ⌘K
+  palette (`CommandPalette.tsx`, cmdk through `ui/command.tsx`; text that names no command goes to
+  the agent's composer as a prompt), the main menu off the bar's Doop mark (`MainMenu.tsx`: Go to files, then File,
+  Edit, View, Object, Text, Arrange, Help) and the ⌃⇧? sheet (`ShortcutsSheet.tsx`) all read it.
+  `CanvasPage` lends the registry its modals and panels as the `ActionHost`. Chords (`chords.ts`)
+  are `mod` (⌘ on a Mac, Ctrl elsewhere), ⌥ chords by `code`, `macOnly` / `notMac` per platform (⌘Y
+  is outlines on a Mac, redo elsewhere), `global` for the two that act from fields (⌘K palette, ⌘/
+  agent; a bare `/` opens the agent outside fields). A chord whose command is disabled or finds
+  nothing falls through to the browser. ⌫, Esc, ↩/Tab and the arrows stay in `CanvasPage`'s own
+  handler (their rules are shown, `hintOnly`). What the commands do lives in `edits.ts`: align /
+  distribute / tidy / pack (`arrange.ts`, pure geometry) move frames as one undo step
+  (`patchFrames`) and layers through the runtime's `move` geometry edit; ⌘G / ⌥⌘G wrap sibling
+  layers in a `div` (carrying a flex parent's flow; grid children are refused; a frame edited while
+  its layout is read is left alone) and ⇧⌘G / ⌘⌫ unwrap (`groupElements` / `ungroupElements` in
+  `layers.ts`); ⇧A makes a box a flex container, or wraps the pick in one, turning the space between
+  the layers into `gap` and dropping their flow margins so nothing moves; ⌥⌘C / ⌥⌘V copy and paste
+  computed looks (`doop:computed`), text styles only between text layers; ⇧⌘V / ⇧⌘R paste over or
+  replace the selection from the canvas clip (a frame goes only once all its replacements land; one
+  undo step, a single `transfer` (`replaceFramesTracked`), so undo never removes a replacement
+  before its original is back; tests in `replaceFrames.test.ts`); ⇧⌘U links (`setElementLink`: an
+  image or SVG is wrapped in the link, other layers' content is); ⌃C is the EyeDropper. ⌘F / ⌥⌘F is
+  the find bar (`FindBar.tsx`, `findText.ts`: text nodes only, locked layers found but never
+  replaced, replace-all is one undo step across frames). View toggles: ⇧' / ⇧C / ⌥⌘\ switch the view
+  options (pixel grid, comment pins, cursors), ⌘Y outline mode (an adopted sheet in each frame's
+  runtime, never saved or exported), ⌥L collapses the Layers tree. N / ⇧N zoom to the next frame in
+  reading order, Home / End bring it into view, PgUp / PgDn change page. Tests:
+  `actionRegistry.test.ts` (no chord bound twice per platform, nor over a tool key),
+  `actionChords.test.ts`, `arrange.test.ts`, `groupLayers.test.ts`, `findText.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
@@ -406,7 +481,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   stay hidden. Drawings and layers snap to their frame's edges and centre, their parent box and
   their siblings (`snapRects` on the runtime's hit replies) as well as the ruler guides.
   Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
-  preserving layout and transforms and committing one undo step per drag.
+  preserving layout and transforms and committing one undo step per drag. A drag on one of
+  several picked layers (or inside one) moves them all: the rest ride the gesture as `followers`
+  (`styleGesture` `begin`), each translated by the pressed layer's delta, put back on Escape and
+  saved with it as one step; a multi-pick never takes a layout drop, and the pressed layer
+  becomes the pick's primary.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
   size separately from transformed bounds. Pending pointer events are buffered until its
   reply, so fast drags and cancellation remain reliable. `src/lib/drawingMove.ts` preserves markup and translates coordinates when
@@ -549,9 +628,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Path tool wears the nib, with a ring over the first anchor (close) and a square over one it
   already placed (`penCursor` from `useCanvasDrawing`, forced over frames by `Stage`); the editor
   shows a node badge on anchors, a dot badge on handles and the pen with + on the outline.
-- `tests/drawing.test.ts` covers geometry, serialization and persistence; `drawingBrowser.test.ts`
-  exercises the toolbar and gestures in Chromium, including Bézier paths, frame transfers,
-  cancellation, mobile input, and coexistence with canvas comment pins and reply fields.
+- `tests/drawing.test.ts` covers geometry, serialization and persistence. Four browser files
+  exercise the toolbar and gestures in Chromium on one shared page setup (`tests/drawingPage.ts`):
+  `drawingShapesBrowser.test.ts` (the tools, Bézier paths, text, mobile input),
+  `drawingMoveBrowser.test.ts` (dragging and copying layers, cancellation),
+  `drawingReorderBrowser.test.ts` (groups, reparenting, reordering, delayed hit-test replies) and
+  `drawingGeometryBrowser.test.ts` (transformed shapes, stacking, canvas comment pins and reply
+  fields). They are separate files so CI's shards can share them out: vitest assigns a file to a
+  shard by the hash of its path, and these four names land in four different shards.
   `tests/drawingMove.test.ts` covers transfer persistence, locks, failed saves and rollbacks,
   creation queued with transfers, and undo/redo. Browser regressions cover transformed shapes,
   stacking contexts, covered shapes, and delayed hit-test replies.
@@ -589,7 +673,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `PATCH /api/comments/:id/anchor` (comment role; `CommentAnchorInput` in `shared/comments.ts`)
   re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
   sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
-  `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingBrowser.test.ts`.
+  `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingGeometryBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
@@ -627,6 +711,20 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   plain try-again rather than being shown. Tests: `authError.test.ts`,
   `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
 
+- Sign-in policy (`shared/instanceSettings.ts`, `server/instanceSettings.ts`): instance admins set,
+  in Admin → Sign-in, whether visitors may sign up with email and password (off hides the form and
+  the `/api/auth/*` mount refuses `sign-up/email` with `SIGNUP_DISABLED`; existing accounts still
+  sign in, provider sign-ups are untouched), whether signed-out visitors go straight to the OIDC
+  provider (`AuthPage` starts the round trip on mount; never after a provider error, under
+  `?manual=1`, or in the desktop shell), and a default workspace every new account joins as a member
+  (`joinDefaultWorkspace`, in the user-create hook, or on verification when SMTP is on, like
+  invites). One row in `instance_settings` (migration 0050), read into memory at boot;
+  `GET /api/oidc-config` adds the public half as `emailPasswordSignup` / `ssoAutoRedirect`;
+  `GET`/`PATCH /api/admin/instance-settings` edit it (409 with a `refusal`). Auto-redirect is
+  refused until an admin has signed in through SSO, so a provider nobody has proven cannot lock the
+  instance out. Env keeps secrets and provider wiring only. Tests: `instanceSettings.test.ts`, the
+  policy cases in `authFormBrowser.test.ts`.
+
 - MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
   (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; the plugin neither rotates nor revokes
   them). A daily prune deletes expired token rows but keeps the newest per user and client,
@@ -647,11 +745,25 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 - Vitest 5 - unit/integration tests across `server/` and `src/`; run via `bun run test`
   (`vitest run`). Tests live in `tests/`.
-- Browser tests drive one shared Chromium and one Vite fixture server (`tests/browser.ts`), which
-  `tests/globalSetup.ts` starts and warms (every `tests/fixtures/*.html` loaded once) before any
-  worker runs; a file calls `openBrowser()` for its own context (focus emulated, 30s navigation
-  bound) and `fixtureUrl()` for its page. A test that needs its own Vite server (a proxy) builds it
-  from `fixtureServerConfig()`, so every server shares one dependency hash and cache directory.
+- Browser tests drive one shared Chromium and one fixture server (`tests/browser.ts`), which
+  `tests/globalSetup.ts` starts before any worker runs. The server hands out a production build:
+  `tests/fixtures.vite.config.ts` is the app's own build with every `tests/fixtures/*.html` as an
+  entry beside `index.html`, built once per run (about a second, as its own `vite build` process
+  with `NODE_ENV=production`) into a temp directory and served by `vite preview`; there is no dev
+  server and no live-reload client. A file calls `pagePerTest()` for a page per test in its own
+  context (focus emulated, 30s navigation bound) and `fixtureUrl()` for its page. A fixture
+  exposes what a test needs on `window`; a test cannot import `/src/...` from the page. A test of
+  what the canvas page itself does mounts the real `CanvasPage` with no backend
+  (`tests/canvasPageFixture.ts`: the room's socket stubbed, the session and API answered by the
+  test). Only a test about what the server does starts one, and serves the same build in front of
+  it with `serveBuilt(proxy)`: `pageControlsBrowser.test.ts`, whose subject is the room's broadcasts
+  racing the HTTP responses and undo against the stored pages.
+- CI runs the browser tests on the Chrome for Testing build named in `.chrome-version`, installed
+  by the `test` job and passed as `CHROME_PATH`, so a runner image update cannot change the
+  browser without a commit. `bun run test:linux [vitest args]` (`scripts/test-linux.sh`,
+  `tests/linux.Dockerfile`, needs Docker) runs the suite in a two-CPU Linux container, for a
+  test that fails on CI and passes on a Mac, and for the clipboard tests a Mac skips; on Apple
+  Silicon the container uses Debian's Chromium, since Chrome for Testing has no Linux arm64 build.
 
 ## 8. CI/CD and Delivery
 

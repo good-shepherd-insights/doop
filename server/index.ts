@@ -24,6 +24,7 @@ import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
+import * as imageDescriptions from './imageDescriptions.ts'
 import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
@@ -44,6 +45,7 @@ import {
 } from './access.ts'
 import { isLinkAccess, roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { auth, initAuth, syncAdmins, getUserName, loginProvidersConfig } from './auth.ts'
+import { getInstanceSettings, hydrateInstanceSettings, loginPolicy } from './instanceSettings.ts'
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
@@ -121,6 +123,7 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 }
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
+await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
@@ -147,15 +150,14 @@ seed()
 
 /* asset bookkeeping (no deletion): every upload records its canvas, and
    asset_refs tracks which frames reference which assets — kept in sync on
-   every durable frame write, rebuilt here from the frames hydrate just
-   loaded. Nothing is ever deleted; asset_refs is the ledger any future
-   cleanup would be built on. */
-{
-  const frames = data.canvases.flatMap((c) => c.frames)
-  reconcileAssetRefs(frames)
-    .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
-    .catch((e) => console.error('[assets] reconcile failed', e))
-}
+   every durable frame write, rebuilt here from the stored frames. Nothing
+   is ever deleted; asset_refs is the ledger any future cleanup would be
+   built on. */
+reconcileAssetRefs()
+  .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
+  .catch((e) => console.error('[assets] reconcile failed', e))
+/* image descriptions for agents: recover the backlog and listen for new assets. */
+void imageDescriptions.startImageDescriptions(broadcast)
 
 /* One stray rejection must never take down the multiplayer server: Node's
    default is to exit, which turned a single aborted analytics upload into
@@ -348,6 +350,7 @@ actions.wire(broadcast, agentTouch)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
 onCanvasEvent(webhooks.onCanvasEvent)
+onCanvasEvent(imageDescriptions.onCanvasEvent)
 
 /* ------------------------------------------------- http api */
 
@@ -358,6 +361,11 @@ const app = express()
 app.set('trust proxy', 1)
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
+
+/* how many canvases have their frame HTML in memory (store.load / evictIdle) */
+app.get('/healthz/store', (_req, res) => {
+  res.json(store.stats())
+})
 
 /* ------------------------------------------------------------------ */
 /* PostHog relay: the client sends analytics + session-replay traffic  */
@@ -427,6 +435,8 @@ app.use('/relay', async (req, res) => {
 app.get('/i/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }
   if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
+  /* metadata only: a cached image needs no html, and a render reads the
+     one frame's html when it starts (store.renderableFrame) */
   const frame = store.getFrame(id)
   if (!frame) return res.status(404).end()
 
@@ -587,6 +597,14 @@ app.put('/u/:token', async (req, res) => {
 const MCP_OAUTH_PATHS = /^\/api\/auth\/(mcp\/|oauth2\/(authorize|consent|token))/
 const VIEW_AS_ALLOWED = /^\/api\/auth\/(sign-out|admin\/stop-impersonating)$/
 app.all('/api/auth/*', async (req, res, next) => {
+  /* Admin → Sign-in turned email/password sign-up off: the form is hidden,
+     and the call it would make is refused too. Sign-in, password resets and
+     provider sign-ups go on as before. */
+  if (req.path === '/api/auth/sign-up/email' && !getInstanceSettings().emailPasswordSignup) {
+    return res
+      .status(403)
+      .json({ code: 'SIGNUP_DISABLED', message: 'Sign-up with email and password is off on this instance.' })
+  }
   const restricted = MCP_OAUTH_PATHS.test(req.path) || (req.method !== 'GET' && !VIEW_AS_ALLOWED.test(req.path))
   if (restricted) {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
@@ -665,7 +683,8 @@ app.post('/api/account-exists', async (req, res) => {
    build shared across self-hosted deploys can't know this at build time —
    see server/auth.ts loginProvidersConfig for what's safe to expose here. */
 app.get('/api/oidc-config', (req, res) => {
-  res.json(loginProvidersConfig())
+  const providers = loginProvidersConfig()
+  res.json({ ...providers, ...loginPolicy(providers.enabled) })
 })
 
 /* Public: the interface language for visitors who have not picked one. The
@@ -739,6 +758,35 @@ app.use('/api', async (req, res, next) => {
     next(err)
   }
 })
+
+/* Every route naming a canvas, frame or comment gets that canvas's frame
+   HTML loaded before its handler runs (store.load), so handlers keep
+   reading the store synchronously, and held until the response is done, so
+   a handler awaiting something slow (an import, a render) keeps it.
+   Behind the session gate, so only a signed-in request can bring a canvas
+   into memory. */
+function loadFirst(canvasOf: (id: string) => string | undefined): express.RequestHandler {
+  return (req, res, next) => {
+    const canvasId = canvasOf(String(req.params.id))
+    if (!canvasId) return next()
+    store.load(canvasId).then(() => {
+      res.once('close', store.hold(canvasId))
+      next()
+    }, next)
+  }
+}
+app.use(
+  '/api/canvases/:id',
+  loadFirst((id) => id),
+)
+app.use(
+  '/api/frames/:id',
+  loadFirst((id) => store.getFrame(id)?.canvasId),
+)
+app.use(
+  '/api/comments/:id',
+  loadFirst((id) => actions.findComment(id)?.canvasId),
+)
 
 /* Home's push channel: tells an open dashboard its canvas list changed */
 app.get('/api/me/events', userEvents.subscribe)
@@ -925,6 +973,7 @@ function requireFrame(
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/image-descriptions', imageDescriptions.imageDescriptionsRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
@@ -1093,6 +1142,9 @@ const KEY_CONNECTS = {
   'anthropic-key': modelAccounts.connectAnthropicKey,
   'openrouter-key': modelAccounts.connectOpenRouterKey,
   'gemini-key': modelAccounts.connectGeminiKey,
+  'deepseek-key': modelAccounts.connectDeepSeekKey,
+  'kimi-key': modelAccounts.connectKimiKey,
+  'kimi-code': modelAccounts.connectKimiCodeKey,
 } as const
 for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {
@@ -2618,8 +2670,11 @@ wss.on('connection', (ws, upgradeReq) => {
 
     if (msg.type === 'join') {
       const session = await sessionPromise
-      const canvas = store.getCanvas(msg.canvasId)
+      let canvas = store.getCanvas(msg.canvasId)
       if (!session) {
+        /* only a canvas the guest may open is loaded for them */
+        if (canvas && guestCanvasRole(canvas)) canvas = await store.load(msg.canvasId)
+        if (ws.readyState !== WebSocket.OPEN) return
         joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
         return
       }
@@ -2631,6 +2686,22 @@ wss.on('connection', (ws, upgradeReq) => {
         ws.close(4404, 'not found')
         return
       }
+      /* checked before loading, so a denied join never loads the canvas */
+      if (!canvasRole(session.user.id, canvas)) {
+        ws.close(4403, 'no access')
+        return
+      }
+      await store.load(msg.canvasId)
+      /* a socket that closed while it waited must not join: its close
+         already ran, so it would sit in the room and pin the canvas */
+      if (ws.readyState !== WebSocket.OPEN) return
+      canvas = store.getCanvas(msg.canvasId)
+      if (!canvas) {
+        ws.close(4404, 'not found')
+        return
+      }
+      /* and again after: access removed while the canvas loaded must not
+         still receive its designs and conversation */
       const role = canvasRole(session.user.id, canvas)
       if (!role) {
         ws.close(4403, 'no access')
@@ -2742,6 +2813,20 @@ wss.on('connection', (ws, upgradeReq) => {
 
 server.listen(PORT, () => {
   console.log(`⟡ doop server     http://localhost:${PORT}`)
+  /* frame HTML is loaded per canvas; a canvas nobody has used for
+     CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
+     Started here, once the room state it asks about exists. */
+  store.setInUse(
+    (canvasId) =>
+      room(canvasId).length > 0 || (agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId),
+  )
+  setInterval(
+    () => {
+      const dropped = store.evictIdle(env.CANVAS_IDLE_MS)
+      if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
+    },
+    Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
+  ).unref()
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {

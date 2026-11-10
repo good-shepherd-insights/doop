@@ -432,6 +432,17 @@ export const assets = pgTable(
     size: integer('size').notNull(),
     uploadedBy: text('uploaded_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    /** what the picture shows, written once by a small vision model
+     *  (server/imageDescriptions.ts) so agents reading the canvas know;
+     *  null until described, and for good after three failed attempts */
+    description: text('description'),
+    describedAt: bigint('described_at', { mode: 'number' }),
+    /** the model label that wrote it */
+    describedBy: text('described_by'),
+    describeAttempts: integer('describe_attempts').notNull().default(0),
+    /** Fixed before the first attempt; null payer means server credentials. */
+    describePayerId: text('describe_payer_id'),
+    describeProvider: text('describe_provider'),
   },
   (t) => [index('assets_canvas_idx').on(t.canvasId)],
 )
@@ -625,7 +636,7 @@ export const modelAccounts = pgTable(
   'model_accounts',
   {
     userId: text('user_id').notNull(),
-    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' */
+    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' */
     kind: text('kind').notNull(),
     /** off keeps the credential but takes the account out of the composer and the default */
     enabled: boolean('enabled').notNull().default(true),
@@ -775,6 +786,15 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
 export const notificationPrefs = pgTable('notification_prefs', {
   userId: text('user_id').primaryKey(),
   commentEmails: boolean('comment_emails').notNull().default(true),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** Whether, and on whose model, images uploaded to a user's canvases get a
+ *  description for agents (shared/imageDescriptions.ts). No row = `account`:
+ *  the owner's connected model account, else the server tier. */
+export const imageDescriptionPrefs = pgTable('image_description_prefs', {
+  userId: text('user_id').primaryKey(),
+  mode: text('mode').notNull().default('account'),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
 
@@ -930,3 +950,15 @@ export const agentFeedback = pgTable(
   },
   (t) => [index('agent_feedback_at_idx').on(t.at)],
 )
+
+/** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
+ *  'instance', written by admins in Admin → Sign-in and read into memory at
+ *  boot. Absent row = the defaults. */
+export const instanceSettings = pgTable('instance_settings', {
+  id: text('id').primaryKey(),
+  emailPasswordSignup: boolean('email_password_signup').notNull().default(true),
+  ssoAutoRedirect: boolean('sso_auto_redirect').notNull().default(false),
+  defaultWorkspaceId: text('default_workspace_id'),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  updatedBy: text('updated_by'),
+})

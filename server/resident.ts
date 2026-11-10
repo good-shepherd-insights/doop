@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -22,6 +23,8 @@ import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
+import { imagesForFrames, isStandaloneImage } from './assets.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
@@ -109,7 +112,15 @@ async function sweep(canvasId: string) {
   /* Agents whose whole queue is stalled. Skipped rather than breaking the
      sweep, so one unpayable queue cannot hide another agent's runnable work. */
   const idle = new Set<string>()
+  /* the canvas stays loaded for every run of the sweep, however long a
+     model turn takes (store.evictIdle) */
+  let release = () => {}
   try {
+    /* only a canvas with work is loaded: wake() sweeps every canvas a person
+       can edit, and loading them all would undo the per-canvas load */
+    if (!actions.pendingWorkAgents(canvasId).length) return
+    await store.load(canvasId)
+    release = store.hold(canvasId)
     for (let i = 0; i < MAX_SWEEP_RUNS; i++) {
       const next = actions.pendingWorkAgents(canvasId).find((name) => !idle.has(name))
       if (!next) break
@@ -123,6 +134,7 @@ async function sweep(canvasId: string) {
       idle.clear()
     }
   } finally {
+    release()
     running.delete(canvasId)
     if (queued.delete(canvasId)) onFeedback(canvasId)
   }
@@ -394,7 +406,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   const actor = actions.resolveActor({ name: role.name, kind: 'agent' })
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
-      'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini or Claude API key in Settings, then retry.'
+      'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter))
       actions.failTaskFeedback(f.id, reason)
     for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter))
@@ -471,12 +483,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        the canvas's established style */
     const visibleFrames = (canvas?.frames ?? []).filter((f) => !f.demo)
     const pages = canvas ? pageList(canvas) : []
-    const frameList = visibleFrames
-      .map(
-        (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", page=${canvas ? framePageId(canvas, f) : '?'}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
-      )
-      .join('\n')
+    const frameList = describeFrameList(visibleFrames, await imagesForFrames(visibleFrames.map((f) => f.id)), canvas)
 
     const sections: string[] = []
     /* design-synced canvases: real navigation between the synced screens is
@@ -1288,8 +1295,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'save_decision',
-    description:
-      'Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Keep it under 500 chars. Design taste only, never one-off content edits.',
+    description: `Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters. Split longer briefs or feedback into separate calls by topic (exemplar, palette, typography, layout), preserving the reason for each choice. Design taste only, never one-off content edits.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -1564,6 +1570,31 @@ export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
    breach the API's 8000px image limit */
+/** How many characters of an image's description the kickoff quotes. */
+const KICKOFF_IMAGE_CHARS = 300
+
+/** The kickoff's frame list: one line per frame, and under it one line per
+ *  image the frame shows with the description the describer wrote
+ *  (shared/imageDescriptions.ts), so a pasted screenshot reads as what it
+ *  is rather than as a 600-byte frame named after a file. */
+export function describeFrameList(frames: Frame[], images: Map<string, FrameImage[]>, canvas?: Canvas): string {
+  const lines = frames.map((f, index) => {
+    const shown = images.get(f.id) ?? []
+    const pasted = shown.length === 1 && isStandaloneImage(f.html) ? ' (pasted image)' : ''
+    const head = `- Frame ${index + 1}: id=${f.id}, name="${f.name}"${pasted}, page=${canvas ? framePageId(canvas, f) : (f.pageId ?? '?')}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`
+    const pictures = shown.map(
+      (image) =>
+        `    image ${image.src}: ${image.description ? image.description.slice(0, KICKOFF_IMAGE_CHARS) : '(description pending)'}`,
+    )
+    return [head, ...pictures].join('\n')
+  })
+  if (images.size > 0)
+    lines.push(
+      'Read the image descriptions above and call screenshot_frame on the relevant frames before designing. A frame marked (pasted image) is a reference someone put there for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.',
+    )
+  return lines.join('\n')
+}
+
 const MAX_SHOT_HEIGHT = 4000
 
 async function frameImageBlocks(

@@ -1,8 +1,11 @@
+import { parse, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { nanoid } from 'nanoid'
-import { eq } from 'drizzle-orm'
+import { asc, eq, gt, inArray } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
+import { emitCanvasEvent } from './events.ts'
 
 /**
  * Uploaded assets (images, and the files of font libraries): bytes in object storage (server/storage.ts), one
@@ -26,6 +29,13 @@ const MIME_EXT = {
 } as const
 
 type AssetMime = keyof typeof MIME_EXT
+
+/** Raster images a vision model can read; svg is markup, so it is not described. */
+const DESCRIBABLE_MIMES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+
+export function isDescribableImage(mime: string): boolean {
+  return DESCRIBABLE_MIMES.has(mime)
+}
 
 /* trust the bytes, not the sender: content sniffing decides the type */
 export function sniffMime(buf: Buffer): AssetMime | undefined {
@@ -125,6 +135,7 @@ export async function storeAsset(
   await db.insert(t.assets).values({
     id,
     canvasId: meta.canvasId ?? null,
+    /* Stable authenticated uploader ID; uploadedBy is only a display name. */
     ownerId: meta.ownerId ?? null,
     mime,
     ext,
@@ -132,13 +143,70 @@ export async function storeAsset(
     uploadedBy: meta.uploadedBy,
     createdAt: Date.now(),
   })
-  return { id, mime, ext, size: buf.length }
+  const asset = { id, mime, ext, size: buf.length }
+  if (meta.canvasId && isDescribableImage(mime))
+    emitCanvasEvent(meta.canvasId, { type: 'asset.stored', asset: { ...asset, canvasId: meta.canvasId } })
+  return asset
 }
 
-export async function getAsset(id: string): Promise<{ meta: AssetMeta; buf: Buffer } | null> {
+/** Only a standalone image layer is reference material; detached designs also
+ * carry data-doop-canvas-element, so the marker alone is not enough. */
+export function isStandaloneImage(html: string): boolean {
+  const isElement = (node: Tree.ChildNode): node is Tree.Element => 'tagName' in node
+  const doc = parse(html)
+  const root = doc.childNodes.filter(isElement).find((node) => node.tagName === 'html')
+  const body = root?.childNodes.filter(isElement).find((node) => node.tagName === 'body')
+  if (!body?.attrs.some((attr) => attr.name === 'data-doop-canvas-element')) return false
+  const content = body.childNodes.filter(
+    (node) => node.nodeName !== '#comment' && !(node.nodeName === '#text' && 'value' in node && !node.value.trim()),
+  )
+  const image = content[0]
+  return (
+    content.length === 1 &&
+    !!image &&
+    isElement(image) &&
+    image.tagName === 'img' &&
+    image.attrs.some((attr) => attr.name === 'data-doop-drawing' && attr.value === 'image')
+  )
+}
+
+/** The images each frame references, with their descriptions, for agents
+ *  reading the canvas: one query over asset_refs, grouped by frame. A frame
+ *  with no raster image is absent from the map. */
+export async function imagesForFrames(frameIds: string[]): Promise<Map<string, FrameImage[]>> {
+  const images = new Map<string, FrameImage[]>()
+  if (frameIds.length === 0) return images
+  let rows: { frameId: string; id: string; ext: string; mime: string; description: string | null }[]
+  try {
+    rows = await db
+      .select({
+        frameId: t.assetRefs.frameId,
+        id: t.assets.id,
+        ext: t.assets.ext,
+        mime: t.assets.mime,
+        description: t.assets.description,
+      })
+      .from(t.assetRefs)
+      .innerJoin(t.assets, eq(t.assetRefs.assetId, t.assets.id))
+      .where(inArray(t.assetRefs.frameId, frameIds))
+  } catch (err) {
+    /* an enrichment: a canvas read must never fail because of it */
+    console.error('[assets] could not read frame images', err)
+    return images
+  }
+  for (const row of rows) {
+    if (!isDescribableImage(row.mime)) continue
+    const list = images.get(row.frameId) ?? []
+    list.push({ src: `/a/${row.id}.${row.ext}`, description: row.description })
+    images.set(row.frameId, list)
+  }
+  return images
+}
+
+export async function getAsset(id: string, signal?: AbortSignal): Promise<{ meta: AssetMeta; buf: Buffer } | null> {
   const [row] = await db.select().from(t.assets).where(eq(t.assets.id, id))
   if (!row) return null
-  const buf = await storage.getObject(`${row.id}.${row.ext}`)
+  const buf = await storage.getObject(`${row.id}.${row.ext}`, signal)
   if (!buf) return null
   return { meta: { id: row.id, mime: row.mime, ext: row.ext, size: row.size }, buf }
 }
@@ -181,13 +249,28 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
   throw new Error('too many redirects')
 }
 
-/** Rebuild the asset_refs projection from a full set of frames — called at
- *  boot with the frames hydrate just loaded (no extra I/O), which both
- *  backfills pre-existing content and heals any drift from failed
- *  write-through. Incremental upkeep afterwards lives in db/persist.ts. */
-export async function reconcileAssetRefs(frames: { id: string; html: string }[]): Promise<number> {
+const RECONCILE_PAGE = 500
+
+/** Rebuild the asset_refs projection from every stored frame — called at
+ *  boot, which both backfills pre-existing content and heals any drift from
+ *  failed write-through. Frame HTML is read a page at a time, since the
+ *  server no longer holds it all (store.ts). Incremental upkeep afterwards
+ *  lives in db/persist.ts. */
+export async function reconcileAssetRefs(): Promise<number> {
   const rows: { assetId: string; frameId: string }[] = []
-  for (const f of frames) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })
+  let after = ''
+  for (;;) {
+    const page = await db
+      .select({ id: t.frames.id, html: t.frames.html })
+      .from(t.frames)
+      .where(gt(t.frames.id, after))
+      .orderBy(asc(t.frames.id))
+      .limit(RECONCILE_PAGE)
+    for (const f of page) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })
+    const last = page.at(-1)
+    if (!last || page.length < RECONCILE_PAGE) break
+    after = last.id
+  }
   await db.delete(t.assetRefs)
   for (let i = 0; i < rows.length; i += 1000) {
     await db

@@ -4,6 +4,7 @@
  */
 
 import { AGENT_ROLES } from '../shared/agents.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 
 export const GUIDE_TOPICS = ['doop-instructions'] as const
 
@@ -63,8 +64,11 @@ brief. It is part of the deliverable, not private scratch work:
    why it won — or state that none fit and the brief derives from the design-quality
    principles alone.
 3. **Post it.** Summarize in set_status ("Designing grocery landing — candlelit mood,
-   after Oatside") and persist the full brief with save_decision so humans and later
-   agents see what you committed to.
+   after Oatside") and persist the brief as separate save_decision calls so humans
+   and later agents see what you committed to. Each call holds one decision and its
+   rationale, at most ${MAX_DECISION_CHARS} characters. Split by topic (exemplar, palette, typography,
+   layout), keeping the reason for each choice with that choice; do not split sentences
+   into arbitrary chunks or discard rationale to squeeze the whole brief into one call.
 
 Skip the brief only when the canvas already dictates the style — established frames,
 style guides or pinned references — or when the human handed you a complete design
@@ -227,6 +231,12 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
   family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
   rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
+- Pictures on the canvas: a frame listed with \`images\` references raster images people
+  uploaded or pasted, each with a \`description\` of what it shows, written by a vision model
+  (null while pending). Read them before designing, and call get_frame_screenshot on the
+  relevant frames to see the pixels. A frame that is nothing but one image (its description is
+  the whole frame) is a reference someone pasted for you: leave it unchanged and deliver in a
+  separate frame. A design that happens to use images is an ordinary frame — edit it when asked.
 - Always reset: * { margin: 0; box-sizing: border-box; } and design to the exact frame size.
 - Size frames to their content: mobile screen 390×844, desktop page 1280×800, card or
   component 480×360, square social post 640×640. Set width/height on create_frame, or
@@ -372,7 +382,9 @@ Memory also learns from feedback. Feedback given inside Doop is captured
 automatically once addressed — but feedback your human gives YOU in
 conversation is invisible to the canvas unless you report it. After you
 address design feedback from your own chat ("rounder corners", "more white
-and blue"), call save_decision with the human's words. Design taste only —
+and blue"), call save_decision with the human's words. Save one decision and its
+rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate
+decisions by topic, preserving the reason for each choice. Design taste only —
 never one-off content edits like typos or copy tweaks.
 
 ## Redesigns — audit first, then two drafts

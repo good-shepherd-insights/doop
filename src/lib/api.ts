@@ -1,7 +1,9 @@
 import { useStore } from './store'
+import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
@@ -149,7 +151,15 @@ export interface Allowance {
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
+export type ModelAccountKind =
+  | 'chatgpt'
+  | 'openai-key'
+  | 'anthropic-key'
+  | 'openrouter-key'
+  | 'gemini-key'
+  | 'deepseek-key'
+  | 'kimi-key'
+  | 'kimi-code'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -326,6 +336,9 @@ export const api = {
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),
   setNotificationPrefs: (prefs: NotificationPrefs) =>
     req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
+  imageDescriptions: () => req<ImageDescriptionPreference>('/api/image-descriptions'),
+  setImageDescriptions: (mode: ImageDescriptionMode) =>
+    req<ImageDescriptionPreference>('/api/image-descriptions', { method: 'PUT', body: JSON.stringify({ mode }) }),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),
@@ -575,6 +588,12 @@ export const api = {
     req<ModelAccounts>('/api/model-account/openrouter-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   connectGeminiKey: (apiKey: string) =>
     req<ModelAccounts>('/api/model-account/gemini-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectDeepSeekKey: (apiKey: string) =>
+    req<ModelAccounts>('/api/model-account/deepseek-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectKimiKey: (apiKey: string) =>
+    req<ModelAccounts>('/api/model-account/kimi-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectKimiCodeKey: (apiKey: string) =>
+    req<ModelAccounts>('/api/model-account/kimi-code', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: (kind: ModelAccountKind) =>
     req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'DELETE' }),
   setAgentModel: (kind: ModelAccountKind, model: string) =>
@@ -718,10 +737,22 @@ export interface AdminStats {
   agentFeedback: number
 }
 
+/** Admin → Sign-in: the policy, and what it depends on. */
+export interface AdminInstanceSettings {
+  settings: InstanceSettings
+  providers: { enabled: boolean; displayName?: string; google: boolean; microsoft: boolean; apple: boolean }
+  workspaces: { id: string; name: string; memberCount: number }[]
+  /** has an admin signed in through SSO yet? (the auto-redirect guard) */
+  ssoAdminSignedIn: boolean
+}
+
 /** Instance-admin surface. Every route 404s for non-admins, so a failure here
  *  is indistinguishable from the feature not existing — which is the point. */
 export const adminApi = {
   canvases: () => req<{ total: number; canvases: AdminCanvas[] }>('/api/admin/canvases'),
+  instanceSettings: () => req<AdminInstanceSettings>('/api/admin/instance-settings'),
+  updateInstanceSettings: (patch: InstanceSettingsPatch) =>
+    req<AdminInstanceSettings>('/api/admin/instance-settings', { method: 'PATCH', body: JSON.stringify(patch) }),
   stats: () => req<AdminStats>('/api/admin/stats'),
   users: () => req<AdminUser[]>('/api/admin/users'),
   agentFeedback: (query: { kind?: AgentFeedbackKind; q?: string; before?: AdminAgentFeedback }) => {

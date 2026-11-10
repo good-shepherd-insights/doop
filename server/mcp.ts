@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
@@ -34,6 +35,8 @@ import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
+import { imagesForFrames } from './assets.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
 import {
   MAX_PDF_FRAMES,
   PDF_UNAVAILABLE_MESSAGE,
@@ -137,6 +140,7 @@ const REVIEW_NUDGE =
   'You have not seen this design yet. Call get_frame_screenshot on it now, judge it against the review checkpoints (fit, spacing, hierarchy, contrast, alignment, realism), and fix any issues before moving on.'
 
 import type { Actor, Frame } from '../shared/types.ts'
+import { loadToolTargets } from './toolLoads.ts'
 
 /** Reaches agents whose session predates set_status (or who skipped the guide). */
 type ToolContent = { content: { type: 'text' | 'image'; [k: string]: unknown }[] }
@@ -255,23 +259,30 @@ const agentName = z
     'Your display name, shown live to everyone on the canvas (e.g. "Claude", "Codex"). Reuse the SAME name on every call so your work is attributed consistently.',
   )
 
-function frameSummary(f: {
-  pageId?: string
-  id: string
-  name: string
-  x: number
-  y: number
-  width: number
-  height: number
-  updatedAt: number
-  updatedBy: string
-  html: string
-  demo?: boolean
-  hidden?: boolean
-  locked?: boolean
-  rotation?: number
-  approval?: FrameApproval | null
-}) {
+/** Said once in get_canvas when any listed frame carries an image. */
+const IMAGES_NOTE =
+  'Frames with `images` reference pictures people uploaded or pasted; each carries a `description` of what it shows (null while it is being written). Read them, and call get_frame_screenshot on the relevant ones before designing. A frame that is nothing but one image is a reference pasted for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.'
+
+function frameSummary(
+  f: {
+    pageId?: string
+    id: string
+    name: string
+    x: number
+    y: number
+    width: number
+    height: number
+    updatedAt: number
+    updatedBy: string
+    html: string
+    demo?: boolean
+    hidden?: boolean
+    locked?: boolean
+    rotation?: number
+    approval?: FrameApproval | null
+  },
+  images?: FrameImage[],
+) {
   return {
     id: f.id,
     pageId: f.pageId,
@@ -288,6 +299,7 @@ function frameSummary(f: {
     ...(f.rotation ? { rotation: f.rotation } : {}),
     updatedAt: new Date(f.updatedAt).toISOString(),
     updatedBy: f.updatedBy,
+    ...(images?.length ? { images } : {}),
     htmlBytes: f.html.length,
     /* public render of the CURRENT design — downloadable/hotlinkable
        (append &download, or .jpg?quality=90 for JPEG) */
@@ -387,6 +399,7 @@ export function buildMcpServer(
     if (agent_name) actions.heartbeatAgent(canvasId, actorFrom(agent_name))
   }
   const server = new McpServer({ name: 'doop-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
+  loadToolTargets(server)
   registerFramePreview(server)
 
   server.registerTool(
@@ -562,7 +575,9 @@ export function buildMcpServer(
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
+      const images = await imagesForFrames(shown.map((f) => f.id))
       const notes = [
+        ...(images.size ? [IMAGES_NOTE] : []),
         ...(flow.length
           ? [
               'This canvas is synced from a live app and `flow` shows how its screens connect — including how often real users take each path. Do not bury or weaken elements that carry heavy navigation.',
@@ -588,7 +603,7 @@ export function buildMcpServer(
             id: c.id,
             name: c.name,
             pages: canvasPages(c),
-            frames: shown.map(frameSummary),
+            frames: shown.map((f) => frameSummary(f, images.get(f.id))),
             guidelines: docs.map((d) => ({
               name: d.name,
               title: actions.guidelineTitle(d),
@@ -930,15 +945,19 @@ export function buildMcpServer(
     'save_decision',
     {
       title: 'Save a design decision',
-      description:
-        'Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). Doop\'s UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas\'s Memory; recurring preferences become suggested style rules. Record design taste only — not one-off content edits like typo fixes or copy changes.',
+      description: `Record a design decision your human made while talking to YOU — style feedback you carried out ("rounder corners", "less purple, more white and blue", "stop using italic serif"). Doop's UI feedback is captured automatically, but you are the only one who hears your own conversation, so report it with this tool AFTER you have addressed it. It lands in the canvas's Memory; recurring preferences become suggested style rules. Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters. Split longer feedback or briefs into separate calls by topic (palette, typography, layout), preserving the reason for each choice. Record design taste only — not one-off content edits like typo fixes or copy changes.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         decision: z
           .string()
-          .max(actions.MAX_DECISION_CHARS)
-          .describe('The feedback in the human\'s own words, e.g. "make it less claude-esque, more white and blue"'),
+          .max(
+            MAX_DECISION_CHARS,
+            `Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic.`,
+          )
+          .describe(
+            `One decision and its rationale in the human's own words, at most ${MAX_DECISION_CHARS} characters. Split longer feedback into separate calls by topic.`,
+          ),
         agent_name: agentName,
       },
     },
@@ -1397,8 +1416,9 @@ export function buildMcpServer(
       const f = frameFor(frame_id, 'view')
       if (!f) return noFrame(frame_id)
       arrive(f.canvasId, agent_name)
+      const images = (await imagesForFrames([f.id])).get(f.id)
       return withFeedbackNotice(
-        text({ ...frameSummary(f), html: f.html }),
+        text({ ...frameSummary(f, images), html: f.html }),
         f.canvasId,
         agent_name ? actorFrom(agent_name) : undefined,
       )
