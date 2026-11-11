@@ -46,6 +46,15 @@
   something matches; six-hour in-memory cache for the free plan's 1,000 requests a day. Every
   result credits One Page Love and the authors with the entry's link (their terms). Tests:
   `inspiration.test.ts`.
+- Where frame CSS goes (`FRAME_STYLES` in `server/guide.ts`): agents are asked to style an element
+  in its own `style` attribute, which is what the editor reads and writes, and to keep a `<style>`
+  block for what an attribute cannot say (keyframes, font faces, `:root` custom properties, states,
+  pseudo-elements, media and container queries, a component's variant rules, the reset). A property
+  a state, variant or query changes sits in the stylesheet with its resting value too, since an
+  inline value outranks every rule. Guidance
+  only: nothing rejects or rewrites a stylesheet, and a frame already styled by classes keeps them.
+  The MCP guide, `create_frame`'s description and the resident agent's system prompt carry the same
+  text. Tests: `frameStyleGuidance.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
@@ -90,6 +99,23 @@
   `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
   sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
   `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
+- Custom providers (`shared/customProvider.ts`, `server/customProviders.ts`,
+  `server/customProviderFetch.ts`, `src/components/CustomProviderForm.tsx`): any OpenAI Chat
+  Completions or Anthropic Messages endpoint, added in Settings → Doop Agent by name, API type, base
+  URL, an optional key and the models it offers (each with "Sees images" and an optional max output
+  tokens, which caps the turn's budget). One is a `model_accounts` row of kind `custom:<id>` (id
+  minted by the server, at most 10 per person) with its description in `custom` (jsonb) and extra
+  headers in `custom_headers` (sealed; migration 0051), so on/off, the default, the composer pick and
+  disconnect are the ordinary account routes. `POST /api/custom-providers` adds, `PUT
+/api/custom-providers/:kind` edits (a key or headers left out are kept, empty clears them);
+  `/models` lists the endpoint's ids and `/test` runs one turn that must call a tool, both rationed per
+  person and able to use an edited provider's stored secrets. Every request goes through
+  `customProviderFetch`: https to public addresses only, DNS pinned per request, no redirects, 32 MB
+  response cap; `DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS` admits private hosts and http for a self-hosted
+  instance, `DOOP_CUSTOM_PROVIDERS=false` turns the feature off (existing ones read as disconnected).
+  Advanced: extra headers (routing and framing headers refused), `max_tokens` vs
+  `max_completion_tokens`, and echoing `reasoning_content`. Tests: `customProvider.test.ts`,
+  `customProvidersHttp.test.ts`, `customProviderForm.test.tsx`.
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
   high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
@@ -535,7 +561,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   its axes with the far corner held still (`keepAnchorTurned`) and do not snap while turned. MCP `update_frame`
   takes `rotation` through `server/pageTools.ts` (normalisation and page validation), and
   `get_canvas` lists it when set; copy, paste and duplicate
-  (`frameClipboard.ts`) carry it. Not yet turned: marquee selection,
+  (`frameClipboard.ts`) carry it. A drawing dragged in, out of or between turned frames lands
+  through `turnedDropRect` (its centre carried through each frame's turn), and a turn whose frame,
+  page or canvas goes mid-drag ends unsaved. Not yet turned: marquee selection,
   snapping and exports read the unrotated box. Tests: `frameRotation.test.ts`,
   `frameRotationHttp.test.ts`, `frameRotateBrowser.test.ts`.
 - Element rotation (`src/lib/elementRotate.ts`): an element inside a frame wears the same rotate
@@ -674,6 +702,20 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
   sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
   `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingGeometryBrowser.test.ts`.
+- Components (`.context/specs/components.md`): a main is an element marked `data-doop-component`; an
+  instance is full markup marked `data-doop-instance`, so frame consumers need no changes. Every
+  frame write passes `prepareFrameHtml` (`server/components.ts`): `<doop-use>` expands, a changed main
+  becomes a revision, instances reconcile against the revision they were rendered from
+  (`server/componentEngine.ts`) and upgrade. `actions.propagateComponents` carries a change across the
+  canvas. The components pass runs first on every write, then `withLibraryFaces`, so an expanded
+  `<doop-use>` naming a library family gets its face. Agents read and write the short form
+  (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the
+  resident agent. `src/lib/components.ts` and `ComponentsPanel.tsx` (the Layers panel's Components
+  tab, beside Tokens) / `ComponentSection.tsx` are the editor's side. A component is renamed from its card's menu
+  or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
+  linked by id, so they follow); an instance's row is not renamed on its own. Stored in `components`
+  (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
+  `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
@@ -710,6 +752,13 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   not a string matches nothing, and such a message (`Application failed to respond`) becomes a
   plain try-again rather than being shown. Tests: `authError.test.ts`,
   `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
+
+- Account deletion: Settings → Your account ends with a Delete account card
+  (`src/components/DeleteAccount.tsx`) and the iOS app has the same action; both call better-auth's
+  `POST /api/auth/delete-user`, with the password when the account has one (`list-accounts` shows a
+  `credential` provider), else on a fresh session. The `beforeDelete` hook
+  (`server/accountDeletion.ts`) deletes canvases only that user could reach and leaves the rest.
+  Tests: `accountDeletion.test.ts`, `deleteAccount.test.tsx`.
 
 - Sign-in policy (`shared/instanceSettings.ts`, `server/instanceSettings.ts`): instance admins set,
   in Admin → Sign-in, whether visitors may sign up with email and password (off hides the form and

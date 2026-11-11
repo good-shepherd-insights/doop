@@ -14,6 +14,13 @@ import {
 import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
+import type {
+  ComponentCode,
+  ComponentDef,
+  ComponentProp,
+  ComponentSlot,
+  ComponentSnapshot,
+} from '../../shared/components.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -506,6 +513,35 @@ export const guidelines = pgTable(
   (t) => [primaryKey({ columns: [t.canvasId, t.name] })],
 )
 
+/** Reusable designs. Keyed per canvas: a copied canvas keeps its ids, so the
+ *  instance markers in its copied frames still point at the right rows. Mirrored
+ *  in memory like guidelines. `history` holds recent revisions inline because
+ *  merging a stale save needs them synchronously. */
+export const components = pgTable(
+  'components',
+  {
+    canvasId: text('canvas_id').notNull(),
+    id: text('id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    template: text('template').notNull(),
+    css: text('css').notNull(),
+    rawCss: text('raw_css').notNull(),
+    head: jsonb('head').$type<string[]>().notNull(),
+    props: jsonb('props').$type<ComponentProp[]>().notNull(),
+    slots: jsonb('slots').$type<ComponentSlot[]>().notNull(),
+    rev: integer('rev').notNull(),
+    mainFrameId: text('main_frame_id'),
+    code: jsonb('code').$type<ComponentCode>(),
+    source: jsonb('source').$type<NonNullable<ComponentDef['source']>>(),
+    history: jsonb('history').$type<ComponentSnapshot[]>().notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
+)
+
 /** Append-only history of guideline docs: one snapshot per save, an empty
  *  markdown marks a deletion. Capped per doc at write time; read on demand
  *  (cold path — no in-memory mirror). */
@@ -636,7 +672,7 @@ export const modelAccounts = pgTable(
   'model_accounts',
   {
     userId: text('user_id').notNull(),
-    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' */
+    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' | 'custom:<id>' */
     kind: text('kind').notNull(),
     /** off keeps the credential but takes the account out of the composer and the default */
     enabled: boolean('enabled').notNull().default(true),
@@ -654,6 +690,12 @@ export const modelAccounts = pgTable(
     model: text('model'),
     /** OpenAI reasoning effort this user picked; null = the server default */
     reasoningEffort: text('reasoning_effort'),
+    /** a custom provider (kind `custom:<id>`): its name, API type, base URL,
+     *  models and options (shared/customProvider.ts); null on every other kind */
+    custom: jsonb('custom'),
+    /** a custom provider's extra request headers, as JSON; they can carry a
+     *  credential, so they are sealed like the key */
+    customHeaders: sealedText('custom_headers'),
     connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
