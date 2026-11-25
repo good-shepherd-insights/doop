@@ -24,11 +24,34 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   Messages may be up to 64 MiB; larger messages and invalid payloads report a specific
   error instead of retrying forever. Backgrounding cancels the current connection,
   and callbacks from that connection cannot change a later foreground session.
+- **Analytics** (`Doop/Analytics.swift`, posthog-ios pinned in the Xcode project): the
+  server decides. It hands out its public PostHog token on `/api/analytics-config` and
+  the SDK posts through that server's `/relay`, so a self-hosted server without a token
+  gets no events. The person is identified by user id like the web client, and reset on
+  sign-out, account deletion and server change. Events carry `$lib = posthog-ios` and
+  `ios_app: true`, plus app lifecycle events and named `$screen`s (Sign in, Library,
+  Agents, Canvas with `canvas_id`, Settings). No session replay, feature flags or PostHog
+  push hooks (the app owns its APNs token). `PrivacyInfo.xcprivacy` declares it.
 - **Native canvas** (`Doop/Blitz/BlitzCanvasView.swift`): a UIKit view with one
-  Core Animation layer per frame. Pan, pinch zoom, tap to select and dismiss the
-  keyboard, double tap a frame or its title to fit it, then toggle between a closer
-  view at the tapped point and fitting the frame. Double tap empty canvas to fit
-  the board; drag a frame by its title. Dragged frames snap to other frames' edges
+  Core Animation layer per frame. Zoom works as in Maps: pinch; double tap to zoom
+  in 2x about the finger; two-finger tap to zoom out 2x; double tap and keep the
+  finger down, then drag down to zoom in or up to zoom out (200 pt per doubling,
+  `DoubleTapDragGesture`). Taps zoom with a 0.3 s glide that a finger landing
+  stops. Double tap a frame's title to fit that frame; the fit control fits the
+  board. Pan, tap to select and dismiss the keyboard, drag a frame by its title.
+  Open comment threads show as pins, as on the web: a disc with the author's
+  initials whose bottom-left corner is the spot (a canvas point, a point on a frame,
+  or an element found by its `data-doop-id` in the frame's Blitz document, at the
+  point tapped while the element has not moved, else its top-left), with a count
+  when the thread has replies, in the author's colour (the web's `colorFor`).
+  Tapping a pin opens a card with that thread and a reply field. Press and hold
+  anywhere to comment there: on an element, a point on a frame's background, or
+  empty canvas, the same anchors as the web's Comment tool; a draft pin marks the
+  spot and the canvas moves it clear of the composer. The Comments list groups
+  open threads by frame; tapping one glides to its pin and opens it.
+  Zoom runs from 3% to 1600%, the web's range; from 300% a hairline pixel grid
+  fades in over the canvas (fully shown at 500%, the web's `pixelGridOpacity`),
+  each line on a device pixel. Dragged frames snap to other frames' edges
   and centers within eight screen points, with alignment guides matching the web.
   Labels, selection outlines and collaborator
   cursors are native layers, so a board with many frames costs one small bitmap per
@@ -57,7 +80,7 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
 - **Deep zoom tiles**: a base bitmap is capped at 3 bitmap pixels per CSS pixel and
   about two screens of pixels. When the screen density exceeds what the base bitmap
   holds, the part of the frame on screen (plus a 30% margin) is painted as a tile at
-  screen density (up to 12 bitmap pixels per CSS pixel at 400% on a 3x screen) and
+  screen density (up to 48 bitmap pixels per CSS pixel at 1600% on a 3x screen) and
   composited over the base, so text stays sharp at any zoom at roughly one screen of
   pixels per paint. Tiles refresh when a gesture settles and when the frame's HTML
   changes; a tiled frame holds its animations still.
@@ -335,8 +358,7 @@ exists only on the local dev database.
 - Native SSO needs a browser authentication session plus a secure server callback /
   single-use session exchange. Email/password is the implemented sign-in path.
 - Model-account setup currently opens Doop's account settings in the system browser.
-- Element comments pin to the selected element; replies and resolution controls have
-  not yet moved to native UI.
+- Comment threads can be replied to natively; resolving still happens on the web.
 - Frames that depend on scripts render as static HTML. A per-frame WebKit fallback
   for those is the next tier, not built yet.
 - Advanced web workflows such as design memory, GitHub imports, workspace billing,

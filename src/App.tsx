@@ -8,6 +8,8 @@ import { CanvasPage } from './pages/CanvasPage'
 import { PrototypePage } from './pages/PrototypePage'
 import { AuthPage } from './pages/AuthPage'
 import { DesktopHandoff } from './pages/DesktopHandoff'
+import { EditorConnect } from './pages/EditorConnect'
+import { EDITOR_CONNECT_PATH } from '../shared/editorConnect'
 import { DesktopSignIn } from './pages/DesktopSignIn'
 import { DesktopConnect } from './pages/DesktopConnect'
 import { DESKTOP_CONNECT_PATH } from '../shared/desktopConnect'
@@ -21,6 +23,7 @@ import { AutomationEditor } from './pages/AutomationEditor'
 import { Integrations } from './pages/Integrations'
 import { Workspace } from './pages/Workspace'
 import { UpgradeHost } from './components/UpgradeHost'
+import { FeedbackHost } from './components/FeedbackModal'
 import { authClient } from './lib/auth'
 import { useStore } from './lib/store'
 import { setName } from './lib/identity'
@@ -57,6 +60,10 @@ export function App() {
   const [route, setRoute] = useState(location.pathname + location.search)
   const path = route.split('?')[0]!
   const { data: session, isPending } = authClient.useSession()
+  // Better Auth marks signed-out refetches pending too. Only the first
+  // lookup needs a loading screen; later checks must preserve the open form.
+  const [sessionChecked, setSessionChecked] = useState(!isPending)
+  if (!sessionChecked && !isPending) setSessionChecked(true)
   /* a signed-out guest on a share link asked for the sign-in form */
   const [guestAuth, setGuestAuth] = useState<'signin' | 'signup' | null>(null)
   const signInRequired = useStore((s) => s.signInRequired)
@@ -134,7 +141,7 @@ export function App() {
     if (localAgentUser) return startLocalAgent(localAgentUser)
   }, [localAgentUser])
 
-  if (isPending)
+  if (isPending && !sessionChecked)
     return (
       <>
         <ShellDragBar />
@@ -208,6 +215,8 @@ export function App() {
     <DesktopCodexSetup key={route} />
   ) : path === DESKTOP_HANDOFF_PATH ? (
     <DesktopHandoff />
+  ) : path === EDITOR_CONNECT_PATH ? (
+    <EditorConnect email={session.user.email} />
   ) : path === '/oauth/consent' ? (
     <OAuthConsent email={session.user.email} />
   ) : path.startsWith('/admin') ? (
@@ -231,6 +240,7 @@ export function App() {
     <>
       {screen}
       <UpgradeHost />
+      <FeedbackHost />
     </>
   )
 

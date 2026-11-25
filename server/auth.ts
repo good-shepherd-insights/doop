@@ -13,6 +13,8 @@ import { acceptInvites, joinDefaultWorkspace } from './workspaces.ts'
 import { getInstanceSettings } from './instanceSettings.ts'
 import { purgeUserData } from './accountDeletion.ts'
 import { MCP_REFRESH_TOKEN_TTL_S } from './mcpTokens.ts'
+import { mcpConsentGuard } from './mcpConsent.ts'
+import { SIGN_IN_PATH } from '../shared/signInPath.ts'
 import { createHash } from 'node:crypto'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
@@ -547,9 +549,16 @@ function buildAuth() {
        so the gate's own default (matching, IdP-verified email) is what
        actually decides linking, as intended. */
     plugins: [
+      /* ahead of mcp(): its authorize issues a code without the consent page
+         unless the client asks for it (see server/mcpConsent.ts) */
+      mcpConsentGuard(),
       mcp({
-        loginPage: '/',
-        oidcConfig: { loginPage: '/', consentPage: '/oauth/consent', refreshTokenExpiresIn: MCP_REFRESH_TOKEN_TTL_S },
+        loginPage: SIGN_IN_PATH,
+        oidcConfig: {
+          loginPage: SIGN_IN_PATH,
+          consentPage: '/oauth/consent',
+          refreshTokenExpiresIn: MCP_REFRESH_TOKEN_TTL_S,
+        },
       }),
       admin({ impersonationSessionDuration: 15 * 60 }),
       /* oneTimeToken: how a Google / Microsoft / SSO sign-in finished in the

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   workspaceMembers: vi.fn((_id: string): string[] => []),
 }))
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},
@@ -27,6 +28,7 @@ vi.mock('../server/workspaces.ts', () => ({
   workspaceMemberIds: mocks.workspaceMembers,
   isWorkspaceMember: (id: string, userId: string) => mocks.workspaceMembers(id).includes(userId),
   hasRole: () => false,
+  linkSharingAllowed: () => true,
 }))
 
 const actions = await import('../server/actions.ts')

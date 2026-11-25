@@ -4,8 +4,9 @@ import { usePaper, type Paper } from '../lib/paper'
 import { roleAllows } from '../../shared/canvasRole'
 import { onViewCommand } from '../lib/viewMenu'
 import type { Frame } from '../../shared/types'
-import { usePageCanvas, currentPageCanvas } from '../lib/pages'
+import { usePageCanvas, currentPageCanvas, usePageLoading } from '../lib/pages'
 import { sendWs } from '../lib/ws'
+import { wheelScrollUnder } from '../lib/wheelScroll'
 import { throttle } from '../lib/throttle'
 import { FrameView, HiddenFrameView } from './FrameView'
 import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
@@ -32,8 +33,9 @@ import { MeasureOverlay } from './MeasureOverlay'
 import { SnapGuides } from './SnapGuides'
 import { GuideLines, Rulers } from './Rulers'
 import { useIsMobile } from '../hooks/use-mobile'
-import { isTypingTarget, MOD_KEY, pressedKey } from '../lib/keys'
+import { isMenuTarget, isTypingTarget, MOD_KEY, pressedKey } from '../lib/keys'
 import { cn } from '../lib/utils'
+import { commentCursorStyle } from '../lib/commentCursor'
 import { gesture } from '../lib/gesture'
 import { hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
 import { MenuHint } from './ui/menu'
@@ -199,6 +201,7 @@ export function Stage({
   insets = NO_INSETS,
   bounds,
   docked = false,
+  hideTools = false,
 }: {
   onAddFrame: () => void
   /** px the top bar, floating panels and islands cover at each of the
@@ -210,6 +213,7 @@ export function Stage({
   bounds?: StageInsets
   /** the panels are docked, so the tool rail is a full-height column too */
   docked?: boolean
+  hideTools?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   /* read by the fit callbacks, which outlive a render */
@@ -251,6 +255,8 @@ export function Stage({
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
   const activePageId = useStore((s) => s.activePageId)
+  /* the page's frames are on their way from the room: it is fitted once they are here */
+  const pageLoading = usePageLoading()
   /* a page with a colour of its own paints the stage, dots in its contrast */
   const paper = usePaper()
   const select = useStore((s) => s.select)
@@ -495,7 +501,8 @@ export function Stage({
         zoom: from.zoom,
       }
     }
-    const f = currentPageCanvas()?.frames.find((x) => x.id === req.frameId)
+    /* the frame's box, even while its page's HTML is on its way */
+    const f = useStore.getState().canvas?.frames.find((x) => x.id === req.frameId)
     if (!f) return undefined
     return fitView(el, f, 1)
   }
@@ -511,6 +518,9 @@ export function Stage({
     const from = useStore.getState().viewport
     const target = flyTargetFor(flyTo, el, from)
     if (!target) return
+    /* the page it flies to is focused on the frame: fitting the whole page when
+       it arrives would take the camera off it */
+    if ('frameId' in flyTo) cameraPage.current = useStore.getState().activePageId
     const start = performance.now()
     const DURATION = 700
     const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
@@ -648,9 +658,11 @@ export function Stage({
   }, [fitFrames])
 
   /* On page entry a link wins over the saved camera, which wins over the
-     first-visit view. Lay it out before the new page paints. */
+     first-visit view. Lay it out before the new page paints, and not before
+     the page's frames have arrived from the room. */
   useLayoutEffect(() => {
-    if (!canvas || !activePageId || (deepLinkHandled.current && cameraPage.current === activePageId)) return
+    if (!canvas || !activePageId || pageLoading) return
+    if (deepLinkHandled.current && cameraPage.current === activePageId) return
     const state = useStore.getState()
     if (state.following) {
       cameraPage.current = activePageId
@@ -689,7 +701,7 @@ export function Stage({
     const saved = pageCameras.current.get(activePageId)
     if (saved) setViewport(saved)
     else fitFrames(canvas.frames, true)
-  }, [canvas, activePageId, fitFrames, focusFrame, focusPoint, linkSearch, setViewport])
+  }, [canvas, activePageId, pageLoading, fitFrames, focusFrame, focusPoint, linkSearch, setViewport])
 
   /* wheel: pan / pinch-zoom — needs a non-passive listener. Trackpads fire
      wheel events faster than the display refreshes, so deltas accumulate and
@@ -728,10 +740,17 @@ export function Stage({
     }
 
     function onWheel(e: WheelEvent) {
-      /* let overlays with their own scrollbar scroll instead of panning */
-      if ((e.target as Element | null)?.closest('[data-stage-scroll]')) return
+      /* ⌘/Ctrl+wheel (and a trackpad pinch) zooms wherever the pointer is */
+      const zooming = e.ctrlKey || e.metaKey
+      if (!zooming) {
+        /* an overlay with its own scrollbar (an open comment thread, a menu)
+           scrolls instead of panning, and keeps the turns past its end */
+        const scroll = wheelScrollUnder(e.target, el!, e)
+        if (scroll === 'scrolls') return
+        if (scroll === 'stops') return e.preventDefault()
+      }
       e.preventDefault()
-      if (e.ctrlKey || e.metaKey) {
+      if (zooming) {
         const rect = el!.getBoundingClientRect()
         pivotX = e.clientX - rect.left
         pivotY = e.clientY - rect.top
@@ -882,7 +901,7 @@ export function Stage({
         byPointer = false
         return
       }
-      if (isTyping(e) || !byPointer) return
+      if (isTyping(e) || !byPointer || (e.target instanceof Element && e.target.closest('[role="dialog"]'))) return
       const control = (e.target as HTMLElement).closest<HTMLElement>(PRESSABLE)
       if (!control) return
       control.blur()
@@ -935,6 +954,8 @@ export function Stage({
     }
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
+      /* an open menu's typeahead keeps its letters, and its Esc only closes it */
+      if (isMenuTarget(e.target)) return
       if (e.key === 'Escape') {
         if (isTypingTarget(e.target) && !e.target.closest('[data-comment-ui], [data-drawing-input]')) return
         if (useStore.getState().tool !== 'select') useStore.getState().setTool('select')
@@ -1223,7 +1244,7 @@ export function Stage({
                             : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
                         : 'cursor-default',
             )}
-            style={{ ...bounds, ...paperStyle(paper) }}
+            style={{ ...bounds, ...paperStyle(paper), ...(tool === 'comment' ? commentCursorStyle() : null) }}
             onPointerDownCapture={drawing.onPointerDown}
             onDoubleClickCapture={drawing.onDoubleClick}
             onTouchStartCapture={drawing.onTouchStart}
@@ -1297,15 +1318,25 @@ export function Stage({
         </ContextMenuTrigger>
         <FollowFrame />
 
+        {pageLoading && (
+          <div
+            role="status"
+            data-page-loading
+            className="pointer-events-none absolute top-[calc(var(--chrome-top,0px)+16px)] left-1/2 z-[35] -translate-x-1/2 rounded-pill bg-surface px-3 py-1.5 text-label text-ink-soft shadow-pop"
+          >
+            {t('stage.pageLoading')}
+          </div>
+        )}
         {/* the tool rail: a vertical island beside the Layers panel on desktop
-            (the page sets --rail-left and --chrome-top), a centred strip at
-            the bottom on phones */}
+            (the page sets --rail-left and --chrome-top), a centred 36px strip
+            8px off the bottom on phones and tablets: the zoom pill, the
+            working-now line and the access banner stack from its 44px top */}
         <div
           className={cn(
-            'absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-1/2 z-[35] -translate-x-1/2 sm:bottom-4',
+            'absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-1/2 z-[35] -translate-x-1/2',
             'md:top-[calc(var(--chrome-top,0px)+10px)] md:bottom-auto md:left-[var(--rail-left,14px)] md:translate-x-0 md:transition-[left] md:duration-150',
             docked && 'md:top-[var(--chrome-top,0px)] md:bottom-0',
-            uiHidden && 'hidden',
+            (uiHidden || hideTools) && 'hidden',
           )}
         >
           {isDrawingTool(tool) && (
@@ -1374,7 +1405,7 @@ export function Stage({
 
         <ZoomControls
           labelRef={zoomLabelRef}
-          hidden={uiHidden}
+          hidden={uiHidden || hideTools}
           onZoomIn={() => ref.current && zoomCentered(ref.current, useStore.getState().viewport.zoom * 1.25)}
           onZoomOut={() => ref.current && zoomCentered(ref.current, useStore.getState().viewport.zoom / 1.25)}
           onZoomTo={(zoom) => ref.current && zoomCentered(ref.current, zoom)}

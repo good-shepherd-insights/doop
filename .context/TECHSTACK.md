@@ -5,8 +5,11 @@
 - TypeScript 5.9 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
   `bun run typecheck` uses `tsgo` (`@typescript/native-preview`, the TypeScript 7 Go compiler) for
   speed; the JS `typescript` package serves editors and the ESLint parser.
-- Node.js - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step, both in dev
-  (`tsx watch`) and prod (`NODE_ENV=production tsx server/index.ts`).
+- Node.js 26 LTS - runtime, pinned in `.node-version` (and `engines`, the Dockerfiles, CI and the
+  self-hosted runner image). Node runs the server's TypeScript itself by stripping types, with no
+  build step or loader: `node --watch server/index.ts` in dev, `NODE_ENV=production node
+server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsconfig keep the
+  source strippable (no parameter properties or enums; `import type` for types).
 - Bun 1.3.10 - pinned via `packageManager` in `package.json`; used as the package manager and
   script runner, not as the server runtime.
 - Rust (stable) - `desktop/src-tauri`, the Tauri desktop shell, and `desktop/src-tauri-chromium`,
@@ -129,6 +132,24 @@
   is checked again when it runs) and `get_canvas` (`customAgents`) read it. Work left for an agent
   that is deleted or off goes to Doop. Routes: `/api/agents` and `/api/agents/builtin`
   (`?workspace=`, members only). Tests: `customAgents.test.ts`, `customAgentsHttp.test.ts`.
+- Editor extension (`vscode-extension/`, `server/editorConnect.ts`, `shared/editorConnect.ts`,
+  `src/pages/EditorConnect.tsx`): Doop in VS Code and its forks, online only. The activity bar lists the account's
+  canvases (MCP `list_canvases` with the extension's agent key), a canvas opens as a webview tab holding the live app
+  in an iframe, the editor's own agent mode gets `/mcp` through `registerMcpServerDefinitionProvider`, and "Connect
+  Coding Agents…" writes the `doop` entry into Claude Code (its CLI, else `~/.claude.json`), Codex (only its own
+  table, every header spelling found, `vscode-extension/src/toml.ts`), Cursor, Gemini CLI and Windsurf configs.
+  Sign-in: `/editor/connect` (signed in, confirm) answers a two-minute code over the editor's deep link
+  (`<scheme>://doop.doop/auth`, only known editor schemes and this extension's authority), and `POST
+/editor/exchange` trades it once for an agent key named after the editor, minted then, so an unfinished sign-in
+  leaves no key. `/editor/whoami` checks a pasted key; `/editor/sign-out` deletes the key. The canvas view signs in
+  with `POST /editor/embed-ticket` (Bearer key, one minute, single use) and `GET /editor/embed`, which only for an
+  iframe (`Sec-Fetch-Dest`) sets the session cookie as `SameSite=None; Secure; Partitioned`, since a webview's iframe
+  is third party and the usual Lax cookie is never sent. Every view of one key shares one session, marked by its
+  `userAgent` (`agentKeys.embedSessionAgent`), which `deleteAgentKey` deletes with the key. The cookie is Secure, so a
+  self-hosted server on plain http (not localhost) cannot sign the view in; the tab says so. Codes and tickets are in
+  memory (one process). Built by `scripts/build-vscode-extension.mjs` (`--vsix` packs it), published on a `vscode-v*`
+  tag by `.github/workflows/vscode-extension.yml`. Tests: `editorConnect.test.ts`, `editorConnectHttp.test.ts`,
+  `vscodeToml.test.ts`.
 - Agent identity (`shared/agentIdentity.ts`): an outside agent is its account and its `agent_name`,
   not the name alone, so two people's "Claude" on a shared canvas are two agents with their own
   presence and tasks. `mcpAgentKey` hashes the two into the opaque `agentKey` on the `Actor`, the
@@ -161,6 +182,25 @@
   `/api/skills` for the scope it will make the canvas in. The composer also has a Skills button that
   writes the `/`, and its menu ends with "New skill", the skills card's form via `?skill=new`. Tests: `skills.test.ts`, `skillsHttp.test.ts`, `residentSkills.test.ts`,
   `skillMenu.test.tsx`, `skillsCard.test.tsx`, `agentInstructionsSkills.test.tsx`.
+- GitHub import runners (`server/index.ts` import route, `server/githubRecon.ts`, `shared/agentLaunch.ts`,
+  `src/components/RepoAgentGuide.tsx`): the route answers who builds the cards (`runner`): the Doop Agent on a
+  model account; the Claude Plan, whose desktop session gets the cards with `read_repo_files` / `finish_repo_card`
+  harness tools (`runRepoCardsOnHarness`; it waits while the desktop is offline); or, with no Doop Agent but an MCP
+  agent of their own, cards marked `payload.outside` that no resident claims and only that person's agent takes with MCP
+  `take_repo_cards`, `read_repo_files`, `finish_repo_card` (a REPO IMPORT notice tells it; a delivery runs the
+  inline-data rule of every agent write, and a card lands once however often it is delivered; the repo tree is kept
+  five minutes per connection, `fetchTreePaths`). With neither, the import
+  window asks who should build it and re-imports once an agent connects. The window opens the person's agent with
+  the prompt filled in (`agentLaunch`: Claude Code `claude-cli://`, Claude Desktop `claude://`, claude.ai and
+  ChatGPT `?q=`, Cursor `cursor.com/link/prompt`; Codex a terminal command) and shows the cards' progress. Connecting
+  a plan and importing again hands waiting cards to the Doop Agent. Repo runs narrate presence only
+  (`narrateAgent`), so a failed card never leaves a finished-looking task; a card the person queued that fails while
+  the canvas is open is a toast (`CardFailureNotices`), and repo cards nobody took yet show as waiting in Recent tasks. In a browser, Settings shows a Plan that is
+  on as connected, with the desktop's online state from `/api/agent-runners`. A repo is connected by its GitHub link
+  (`parseRepoRef` in `shared/githubRepo.ts`: browser links, clone URLs or `owner/repo`; a `/tree/` or `/blob/` link's
+  branch is the longest prefix of its path the repo has), connecting a repo the canvas already has on that branch
+  gives that connection the new credential, and connecting goes straight on to the screen picker. Tests:
+  `repoCards.test.ts`, `agentLaunch.test.ts`, `githubRepo.test.ts`, the connect-by-link cases in `github.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
@@ -187,6 +227,21 @@
   bound; Refresh asks again) and its `PATH` is given to every CLI process, since a GUI app's
   `/usr/bin:/bin` PATH lacks the `node` an npm install needs. Shells advertise this with
   `__DOOP_CLAUDE_CHOOSE__`.
+  A run's outcome is read from Claude Code's closing `result` event (`run_result` in `claude.rs`):
+  `is_error` decides success (an API error still says `subtype: "success"`), the text is `result`,
+  else `errors`, and `error_max_turns` is sent as `limitReached`. The resident (`server/resident.ts`)
+  sets no turn limit on the person's own connection (the shell passes Claude Code no `--max-turns`;
+  older shells clamp the job's `HARNESS_MAX_TURNS` to 80), only `RUN_TIME_LIMIT_MS`, the 30 minutes
+  the relay also gives a run (`expiry` in `server/localAgentRuns.ts` reports it as `limitReached`);
+  runs on Doop's key keep 60 / 80 turns. A run stopped at a limit is judged by its work as a capped
+  API run is, and the resident puts any other failure's own
+  words on the card (`crashReason` in `server/runFailure.ts`): the CLI's text, or an error the model
+  call itself threw on the person's own connection, never one of ours or a server-tier one. A
+  failure the relay words itself (`fromDoop`: the desktop went away, a worker is down) is shown as it
+  is. A shell from before `limitReached` is read by its fallback text (`shellResult`).
+  Tests: `runFailure.test.ts`, `result_event_reads_is_error_and_errors` in `claude.rs`.
+- Checked work (`server/changeChecks.ts`, its header has the rules): a resident run on a card must have
+  looked at what it changed before it finishes. Tests: `residentChecks.test.ts`.
 - Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected
   account's picker asks the provider's catalog with the user's own key when it opens (the
   composer's `ModelPicker`) or mounts (Settings, `useAgentModels`), merging the curated entries of
@@ -336,8 +391,34 @@
   with posthog-js: every export and Copy as PNG through `src/lib/exportEvents.ts` (`frames_exported`
   with `source` and `target`, `png_copied`), `prototype_played`, `prototype_interactions_saved`,
   `text_formatted`, `svg_imported`, `pdf_imported`.
+- Which client: web events carry posthog-js's `$os`; the desktop shell registers `desktop_app`,
+  `desktop_app_platform` (`macos` / `windows` / `linux`) and `desktop_app_version` on every event
+  (`src/lib/posthog.ts`); the iOS app sends its own through posthog-ios (`ios/Doop/Analytics.swift`,
+  `$lib = posthog-ios`, `ios_app: true`, named `$screen`s), with the token from the public
+  `GET /api/analytics-config` (`analyticsConfig` in `server/analytics.ts`: `VITE_POSTHOG_KEY`, else
+  `POSTHOG_KEY`, else null and the app sends nothing) and through that server's `/relay`.
+  `$os = iOS` without `$lib = posthog-ios` is mobile Safari. Tests: `analyticsConfig.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
+- Storybook import (`.context/specs/storybook-import.md`, an extension: `server/storybook/`,
+  `src/integrations/storybook/`, shared `shared/storybook*.ts`, CLI `cli/doop-storybook.ts` built to
+  `public/cli/doop-storybook.mjs` by `bun run build:storybook-cli`): a Storybook's stories into Doop
+  components. `storybookPage` runs in the story's page (the server's renderer for a public
+  Storybook; the developer's Playwright, Puppeteer or Chrome through the CLI for localhost or a VPN,
+  which sends captures to MCP `import_storybook` with an agent key): props from the preview's
+  story store (enum and boolean controls as enum props, shown string args as text props), each
+  value re-rendered over the addons channel, CSS from the CSSOM, decorators stepped past, dark
+  through a theme global or `prefers-color-scheme`. `buildKit` turns the class differences between
+  renders into `[data-<prop>]` rules, `.dark` into `[data-doop-theme="dark"]`, theme colours into
+  tokens; the importer writes fonts (`addCanvasFont`), tokens and components (`runComponentTool`,
+  so every note an agent gets applies), checks each main against its story's pixels
+  (`fidelity.ts`) and keeps the source in `storybook_sources` for sync (a content
+  hash per component; tokens it made update, others are left alone). REST under
+  `/api/canvases/:id/storybook`, MCP `list_storybook_components` / `import_storybook` /
+  `sync_storybook`, a job per canvas shown as the "Storybook Import" task. Tests:
+  `storybookKit.test.ts`, `storybookCaptureBrowser.test.ts` (fixture `tests/fixtures/iframe.html`),
+  `storybookImport.test.ts`, `storybookImportHttp.test.ts`, `storybookCli.test.ts`, and the opt-in
+  `storybookLive.test.ts` (`STORYBOOK_LIVE_URL`).
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
   per workspace (used on its canvases) and one per person (used on their personal canvases),
   managed in Settings → Fonts and Workspace → Fonts (`FontLibrary.tsx`, strings in the `fonts`
@@ -383,16 +464,89 @@
   typed design values (Paper's eleven types: colour, opacity, radius, spacing, container,
   breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom
   property frames use as `var(--name)`, with a value per theme (`canvas.tokenThemes`; a frame
-  switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
-  frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs (the
-  component preview sheet included), and a
-  token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
-  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
+  switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` makes the
+  `<style data-doop-tokens>` block of the values a document names; it is composed in where a frame
+  is rendered, not stored in it (Lean frame storage, below), so a value change writes no frame. A
+  rename (`var(--old)` in frames' source) or a theme rename still rewrites the frames naming it, as
+  an annotation (sign-off stands, no version). It reaches the canvas's own component definitions
+  first (`renameInComponents` in `server/tokenRenames.ts`): every active one whose
+  template, stylesheet or head names the old name gets a revision with the new one (a linked
+  library definition is left to its library), and instances marked with the revision it moved
+  past are marked with the new one as their frames are rewritten, so the renamed markup is never
+  filed as an override. Stored in `design_tokens` + `canvases.token_themes` (migration 0050); REST under
   `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
   markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
   `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
   (`TokensPanel.tsx`) and token menus on the Design panel's colour, radius and font-size fields.
   Tests: `designTokens.test.ts`, `designTokenWrites.test.ts`, `designTokensHttp.test.ts`.
+- Compact frame storage (`server/frameRest.ts`, spec `.context/specs/components.md`, Model): in memory
+  and on the wire a frame's HTML holds every component instance written out, as before; at rest
+  (`frames.html`, `frame_versions.html`) an instance is a reference,
+  `<doop-use component="<id>" id="…" …>` with its props, overrides and slot content. `restingHtml` makes
+  the references where `server/db/persist.ts` writes a frame row or a version (a canvas or page
+  copy is stored written out and goes compact frame by frame; `persist.restFramesThrough`, wired in `server/index.ts`, hands it the canvas's components), and
+  only for an instance whose reference, expanded there and then, gives exactly the markup the write
+  pipeline would hold for it; an instance of an unknown, deleted, hollow or not-yet-stored definition
+  stays written out. `wakingHtml` writes references out where the store reads frame HTML
+  (`store.wakeHtml`: page loads, `renderableFrame`, the version preview and restore), one frame per
+  operation and per turn of the event loop, and brings instances stored written out up to their
+  components' current revision; a reference it cannot render is kept as a visible placeholder
+  (`data-doop-lost-use`) that the next save stores as the reference again, never dropped. So a change to
+  a component's markup writes no frame: frames in memory are rendered again (`store.rerenderFrame`:
+  `html` and `rendered` move, `updatedAt` does not; the room gets `frame:updated` with `rerender`), and
+  the rest are rendered from the component when their page is read. Both forms are read under either
+  setting of `DOOP_COMPACT_FRAME_STORAGE` (false stores instances written out again); existing frames
+  go compact on their next write. Rolling the code back past
+  this needs the compact rows written out first. Tests: `frameRest.test.ts`,
+  `compactFramesHttp.test.ts`, `frameRerenderStore.test.ts`, `frameRestBench.test.ts` (what a heavy
+  page costs to read and store).
+- Lean frame storage (`shared/frameCompose.ts`, `server/frameCompose.ts`, `src/lib/frameCompose.ts`): a
+  frame's stored HTML is its source. What the canvas supplies to every frame is not in it: the
+  stylesheet of each component it uses (`<style data-doop-component-css>`), the head tags those
+  brought (`data-doop-component-head`) and the token block. `composeFrameHtml(source, { tokens,
+themes, components })` puts them in (component blocks at the end of the head, token block first,
+  as writes always placed them) and `stripSharedBlocks` / `sourceOf` take them out, both string
+  level, idempotent, and the same for a frame stored before this with stale blocks in it, so
+  nothing is backfilled: such a frame goes lean on its own next write. Font faces, the hosted-font
+  link, `data-doop-detached-css` and a hollow component's stylesheet stay in the frame. Writes
+  prepare the composed document as before (the font scan reads it) and store `storedHtml` of it.
+  A token value change (`restyleTokenFrames`) and a revision of a component's rules alone
+  (`propagateIntoFrame`; an instance's `data-doop-rev` is its component's `renderRev`, which such
+  a revision leaves alone, see Components) write a frame only when its source changes. Composed on the way out: the renderer (`renderDocument` in
+  `server/screenshot.ts`, the one place every screenshot, `/i/` image, thumbnail, inspection and PDF
+  export passes; a print shell or preview sheet is marked
+  `wholeDocument`), MCP `get_frame` with `expand_components`, the version preview route (with the
+  canvas's styles as they are now) and a Memory reference at pin time. Agents' compact form is the
+  source, token block gone; `edit_frame_html` (`editFrameHtml` in `server/componentActions.ts`, MCP
+  and resident) matches its text in the compact form, the stored source or the composed document,
+  stores the result as source, and refuses an edit that only touched what the canvas supplies, or
+  one whose replacement opens or closes more `<doop-use>` / `<template>` tags than its find text,
+  or closes one ahead of its opening further than the find text does, so the tags around it would
+  pair up wrongly (`tagBalance` in `server/componentEngine.ts`, `unbalancedEdit`; it reads the
+  command alone, so `runCanvasWrite` refuses it before it runs;
+  `tests/editFrameHtmlBalance.test.ts`).
+  `asset_refs` are projected from the composed document (`persist.viewAssetsThrough`), so an asset
+  a component's stylesheet names counts, as of the frame's own last write. The browser composes too: its join says `composesFrames` and its REST
+  requests carry `x-doop-composes-frames`, so it is sent sources; the store keeps sources
+  (`asSource`), `FrameView`, the prototype player and the drag preview post
+  `useComposedFrame` / `composeFrame` output, re-posted when the tokens or a used component's
+  rules change (no `frame:updated` involved), and what the runtime serializes back is stripped
+  before the store, undo history or `api.updateFrame` see it. Every other client
+  (the native apps, a tab on an older bundle, a script) is sent composed frames in `init`,
+  `page:frames`, `frame:created` / `frame:updated` and REST answers (`withComposedFrames`), and a
+  `frame:updated` for each frame a `tokens` or `component` message restyled
+  (`server/legacyFrames.ts`: each connection keeps a key of `composeFrame(...).shared` per frame
+  it was sent; a change composes only the frames a string check says it can reach, the changed
+  component's instance marker or the changed token names with their dependents, once per frame
+  however many such connections there are). A render is stamped with what it was supplied
+  (`server/styleVersion.ts`, `stampRender`: the frame's `updatedAt`, plus the versions of the
+  tokens its document names and the components it uses, taken when the render reads its HTML),
+  so the `/i/` cache and thumbnails retire a render when one of those changes, not on any other
+  change to the canvas, and checking a stamp reads no frame HTML.
+  `DOOP_LEAN_FRAME_STORAGE=false` is the temporary switch back to storing composed documents and
+  rewriting frames on token changes; reads compose either way. Tests: `frameCompose.test.ts`,
+  `leanFrameStorage.test.ts`, `leanFramesHttp.test.ts` (both settings, legacy and composing
+  connections, renders), `legacyFrames.test.ts`, `sharedStylesBrowser.test.ts`.
 - Hosted fonts (`shared/webFonts.ts`): the Design panel's font menu offers the "Fonts" group, a
   curated roster of open families on Google Fonts (`WEB_FONTS`, each with its css2 axes), plus
   two "Device fonts" (system UI, system monospace) labelled as varying by viewer; the OS stacks
@@ -426,6 +580,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   load falls back to the initials); it rides `Presence` (set at `join`, re-announced to the person's
   rooms on a change), `/api/me`, the session, canvas `people`, the share list and workspace members.
   Tests: `avatar.test.ts`, `avatarFace.test.tsx`.
+- Feedback from people (`shared/productFeedback.ts`, `server/productFeedback.ts`, `src/lib/feedback.ts`,
+  `src/components/FeedbackModal.tsx`): a signed-in person writes a short note (up to 2,000 characters)
+  and `POST /api/product-feedback` emails it to `FEEDBACK_EMAIL` through `sendMail`, with the sender as
+  Reply-To and the page they were on; nothing is stored, five notes an hour per account, PostHog gets
+  `product_feedback_sent` (length and page, never the text). Unset `FEEDBACK_EMAIL`, `/api/me` carries
+  `feedback: false` and no button shows. Entry points all call `openFeedback()`, shown by the one
+  `FeedbackHost` in `App`: the rail's Feedback row, the account menu, the canvas Help menu and the
+  `feedback` action (main menu, ⌘K). Agents have their own channel (Agent feedback, above). Tests:
+  `productFeedback.test.ts`.
 - Plans and the way to Pro (`shared/billing.ts`, `server/entitlements.ts`, `src/lib/upgrade.ts`,
   `src/lib/planFeatures.ts`, `src/components/PlanCards.tsx`): the paid plan is sold as Pro (its id
   stays `team`: Stripe metadata, the workspaces table and `/api/me` carry it); plan copy lives in the
@@ -572,27 +735,149 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fault-injection sweep `workBudgetCommit.test.ts` (memory, a modelled database and a viewer's
   replayed copy, for every write operation) and `writeBoundaryHttp.test.ts` (the real server,
   rebooted on its database).
+- Canvas writes (`server/canvasWrites.ts`): a frame's
+  HTML and metadata are written through one entry, `runCanvasWrite(canvasId, command)`, a typed
+  command carrying intent (`create-frame`, `write-frame`, `edit-frame-html` with its find and
+  replace, `frame-meta`, `restack-frames`, `set-approval`, `agent-approval`, `delete-frame`,
+  `restore-version`, `stamp-element-id`, and for streams `append-frame-html`,
+  `settle-stream`, `close-stream`, and for tokens `create-tokens`, `set-tokens` (a rename rewrites
+  the frames naming the token; a value change writes no frame under lean storage) and
+  `set-token-themes` (a theme rename rewrites the frames naming it); each answers the tokens as
+  its write left them, and a refused theme list rejects with `TokenThemesError`) and answering a typed result, read off its handler. An agent's
+  command carries its surface (`inline: 'mcp' | 'resident'`) and the host checks the HTML it adds
+  for inline data against the frame as the host holds it, by that surface's rule (`heldForms` for
+  MCP, read lazily; stored HTML for the resident; a chunk joined to its stream's tail). Contract for every host: always a promise, a failure only its rejection, awaited
+  inside an operation that awaits (REST through `writeRoute` in `server/index.ts`, which hands a
+  rejection to `undoRequest`; MCP and resident tool calls), so a
+  rejection undoes the operation. The entry refuses a frame on another canvas than `canvasId`
+  (`CanvasMismatchError`) and enforces a command's `ifUpdatedAt` as it writes
+  (`FrameVersionConflict`, answered over REST as the 409 `requireFrame` gives). Its only host is
+  local: the actions above, which still write synchronously when called, so writes, undo and
+  `afterCommit` are as before. Routed: the REST frame routes, MCP and resident frame tools,
+  version restore, `/element-id`, stream chunks (MCP, REST, the welcome demo)
+  and idle settling. `wireCanvasWrites()`, called once at boot by `server/index.ts`, installs the
+  settler the playback tick in `actions.ts` calls (`settleIdleStreams`); so
+  `actions.ts` imports nothing from `canvasWrites.ts`, and unwired, the tick says so instead of settling. A stream is settled only while it is
+  still the one found idle (`lastActivity`); one whose settling fails for anything but its work
+  budget is tried 3 times (`SETTLE_ATTEMPTS`, 1 s then 5 s apart), its error logged once, then
+  closed unsettled, as a budget refusal is; a pass never rejects. Tokens from REST, MCP and the resident go through it. Component definitions
+  go through it too (`create-component` from markup or an element, `create-components`, each
+  entry its own unit, `update-component`, `delete-component`, `restore-component`,
+  `restore-component-version`), from REST, MCP and the resident (`server/componentTools.ts`); each
+  can answer a `view` (catalog entry and touched frames, read in the write's own step) when it
+  asks (`view: true`: the agent tools; REST never asks, and pays nothing for it), and reuse notes
+  are read where they always were. Instances go through it too (`insert-instance`, `change-instances`,
+  from `insert_instance`, `update_instances` and REST `/api/frames/:id/instances`).
+  Imports and ingest go
+  through it with `create-frame` / `write-frame` (webpage and website import over REST, MCP and the
+  resident; Meta; `/ingest`; the GitHub sketches).
+  `runImportWrite` is a savepoint of the request or tool call it runs in, else an operation of
+  its own. `landImportFrame` (a website's pages, Meta) makes each frame its own unit and
+  answers a refused one as that frame's failure, so pages already landed stay; only a spent work
+  budget inside a request or tool call rejects. The REST import routes have no catch of their
+  own: any failure goes to `importRefusal`, which undoes the request and answers the JSON 400
+  they always did (422 for a work budget). Where one function both fetches and writes (MCP
+  `import_webpage`, `/ingest`), a write's rejection is marked (`isImportWriteFailure`) so the import's own catch
+  passes it on; the GitHub review round fetches inside its catch and writes outside it. Comment anchoring stamps through
+  `stamp-element-id` (a new comment, a moved one; both routes through `writeRoute`, and a
+  charged task is given back when the comment is not posted, `server/chargedWork.ts`). The boot
+  backfill uses `stamp-element-ids` (`actions.stampElementIds`: every stamp of a frame in one
+  annotation write, nothing for a frame mid-stream), one operation per frame, then stores the
+  row before the comments name the ids. `actions.ts` reaches the entry by a dynamic import, so
+  it still imports nothing from `canvasWrites.ts` when it loads. The seed canvas at first boot
+  stays a direct `store` write.
+  The workspace library goes through it too: `import-component` (from a workspace library,
+  linked, or a copy from any canvas the caller checked it may read), `sync-component` and
+  `sync-library-updates` (one, or every waiting pull all or none; the caller's read check rides
+  along as `readable`, `readableSources`), `pull-library` (one per canvas from
+  `updateLibraryConsumers`, now in `server/libraryUpdates.ts`, which commits each with
+  `checkpoint()` before the next, as before the entry; once a pull was committed, a refusal or a
+  spent budget anywhere in a canvas's step (its load, its pull, the wait for its frames) stops the
+  walk and is reported in `skipped`, the canvases not reached that still use the library as
+  `not_reached`; anything else is logged and fails the call) and `carry-library-tokens` (the
+  tokens of components a frame write took up, sent once that write lands through
+  `carryAdoptedTokensWith`, which `wireCanvasWrites()` installs; unwired, they are carried
+  directly and that is logged once; the adoption itself is part of the frame write), from REST
+  (`/components/import`, `/components/:id/sync`, `/library/update-consumers`), MCP and the
+  resident; `view: true` builds the catalog entry and frames in the write's step, never failing
+  it. Copying from a canvas that is not a library still sub-commits per component it updates
+  (`checkpoint()`). Publishing writes the library's publication, not
+  a canvas, and is not routed.
+  The background queue's frames go through it too (`propagate-frame`, `detach-frame`):
+  `server/propagation.ts` sends each frame's turn through the routes `canvasWrites.ts` sets
+  as it loads (`routeFrameTask`; unrouted, as in a test of the actions alone, the task's own
+  handler does it). Each turn is its own operation, and each canvas has at most one turn in
+  flight while the others take theirs. A turn unanswered after 30 s (`TURN_TIMEOUT_MS`) is
+  said as failed and its canvas goes on. A canvas deleted mid-turn, or a job that ended,
+  keeps nothing of the answer and reports nothing. A failing turn is undone, said and
+  skipped, as before, and a tick never rejects. Detaching every instance is `detach-instances`
+  (delete_component's `detach_instances`, REST `/detach-instances`), answering the ids it
+  queued, and the frames only when asked (`frames: true`, the agent tools). Every server write
+  to a canvas's frames, components and tokens now goes through the entry. Tests:
+  `canvasWrites.test.ts`, `importWrites.test.ts`, `canvasWritesLibrary.test.ts`,
+  `writeBoundaryHttp.test.ts`.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
 - Frame HTML in memory (`server/store.ts`, `server/frameHtml.ts`): the store keeps every canvas
-  and frame, but frame HTML (most of the data) loads per canvas. Boot reads `frames` without `html`;
-  `store.load(canvasId)` reads one canvas's (concurrent calls share the read) and `evictIdle` drops
-  it after `CANVAS_IDLE_MS` (10 min) unused, never while a room, an MCP agent's presence, a stream,
-  a `store.hold` or an unsaved frame is on it (`persist.frameWritePending`: dirty from a save until
-  a write at that state succeeds, so a debounce, a write in flight and a failed write all count; the
-  sweep retries a failed one). Entry points load and hold for their length, and the rest stays
-  synchronous: the REST middleware for `/api/canvases/:id`, `/api/frames/:id` and
-  `/api/comments/:id` (behind the session gate, held until the response closes), the room `join`,
-  every MCP tool naming `canvas_id`, `frame_id` or `frame_ids` (`server/toolLoads.ts` wraps
-  `registerTool`), resident sweeps and automation pulls, ingest, the local and Gemini agent
-  endpoints. `/i/` renders
-  read the one frame's HTML (`store.renderableFrame`) instead of loading its canvas. Reading an
-  unloaded frame's `html` throws `FrameHtmlNotLoadedError` and starts loading that canvas, so a
-  missed entry point fails loudly rather than seeing an empty design; assigning it always works. The
-  boot asset-ref reconcile pages through Postgres. Context: by 2026-11-09 frame HTML was 6.4 GB on
-  disk and ~11.7 GB of V8 heap (60% of frames hold a non-Latin-1 character, which makes V8 store
-  the whole string at two bytes a character), against a 12 GB heap cap. Tests:
-  `lazyFrameHtml.test.ts`, `lazyFrameHtmlHttp.test.ts` (a restart, then REST, the room, MCP and an
-  idle drop).
+  and frame, but frame HTML (most of the data) loads per page. Boot reads `frames` without `html`;
+  `store.loadPages(canvasId, pageIds, frameIds?)` reads the HTML of the frames on those pages (and of
+  `frameIds` wherever they are) by id, 200 ids a query, concurrent loads
+  sharing each frame's read; `store.load(canvasId)` is every page, for work on the whole canvas;
+  `store.loadForFrames` is a frame write's: its page plus every component main (a write that carries a main
+  asks whether it lives in another frame). What a read takes into memory is the frame rendered: stored
+  component references are written out, each frame in its own operation and turn of the event loop
+  (`store.wakeHtml`, Compact frame storage); a frame that cannot be rendered within its budget fails the load. `evictIdle` drops a page after `CANVAS_IDLE_MS` (10 min) unused,
+  never while a load is on its canvas, a `store.hold` keeps it (a hold names a scope: `'all'` for an agent run,
+  a job or a whole-canvas route, else the pages and frames a write or a drawing reads, `framesScope` /
+  `pageScope`; releasing it counts only those pages as used), an MCP agent's presence or a stream is on the
+  canvas (`inUse` true: every page), a browser in the room shows that page (`inUse` names the pages: the
+  join's page until the browser says, then the ones its `pages:shown` lists; a page it only read with
+  `page:load` is not one), or a frame on it is unsaved
+  (`persist.frameWritePending`: dirty from a save until a write at that state succeeds, so a debounce, a write
+  in flight and a failed write all count; the sweep retries a failed one); a frame loaded some other way counts
+  its page as used from the sweep that sees it. `isLoaded` means every frame's HTML is in memory. Entry points load and hold for their length, and the rest stays synchronous: the REST
+  middleware (behind the session gate, held until the response closes) loads a frame's routes with
+  `loadForFrames` (deleting a frame and the instance routes, whole), a comment's with its frame's, a canvas's
+  whole except the ones that read no frame HTML (`HTML_FREE_CANVAS_ROUTES`: guides, page colour and flow start, thumbnail, members, agents, fonts, canvas comments, page copies,
+  which read their own page) and `POST /frames` (the page drawn on) and `PUT /stack` (the frames named); the
+  room `join` and `page:load` (the page); every MCP tool naming `canvas_id`, `frame_id` or `frame_ids`
+  (`server/toolLoads.ts` wraps `registerTool`; the whole canvas), resident sweeps and automation pulls, ingest,
+  the local and Gemini agent endpoints (whole). `/i/` renders read the one frame's HTML
+  (`store.renderableFrame`) instead of loading its page. Reading an unloaded frame's `html` throws
+  `FrameHtmlNotLoadedError` and starts loading that frame's page, so a missed entry point fails loudly rather
+  than seeing an empty design; assigning it always works. `asset_refs` is kept per write only; there is no full
+  rebuild (it read all frame HTML on every boot), and a ref a failed write left behind is put right by the
+  frame's next save. Context: by 2026-11-09 frame HTML was 6.4 GB on disk and ~11.7 GB of V8 heap (60% of
+  frames hold a non-Latin-1 character, which makes V8 store the whole string at two bytes a character), against
+  a 12 GB heap cap; on 2026-11-16 a canvas of 804 frames on 31 pages (163 MB of HTML, its heaviest page 33
+  frames and 19 MB) could not open, since its init carried every page. Tests: `lazyFrameHtml.test.ts`,
+  `lazyFrameHtmlHttp.test.ts` (a restart, then REST, the room, MCP and an idle drop), `pageLoadingHttp.test.ts`.
+- Pages over the room (`server/index.ts`, `src/lib/ws.ts`, `src/lib/pages.ts`): a browser's `join` says
+  `pagesOnDemand` and names the page it opens on (`pageId`: the page it shows on a rejoin or the URL names;
+  `frameId`: a frame the URL links), which the server resolves with the browser's own rule (`openingPageId`,
+  now in `shared/pages.ts`). `init` carries every frame's metadata (`WireCanvas`, `WireFrame`: a frame
+  without `html`) and the HTML of that page alone, listed in `loadedPageIds`. Opening another page sends
+  `page:load`; the server reads it and answers `page:frames` (or `page:failed`, asked again after 2 s), and from
+  that answer on the room sends that browser the page's frames with their HTML (`Conn.pages`), since the room
+  sends in order on one socket and nothing written after the read is missed; frames on the other pages it knew
+  at the join come as metadata (`forPages`), and a page made since comes whole (`Conn.joinedPages`). A room
+  message rather than a REST route for that reason. The browser keeps the pages it read; `stalePages` are the
+  ones `init` left out and any a frame arrived on without its HTML, and a rejoin marks every page but the one
+  `init` sent stale, so a page is never shown from an old copy; an `init` without `loadedPageIds` (a server from
+  before page loading) is every page whole. The browser tells the room the pages on screen (`pages:shown`:
+  the editor's page and the pages of frames `showFrames` registers, a prototype's screens), which it asks
+  for whenever they are not here, after a failed read too, and the room keeps in memory while they are up. `usePageCanvas` /
+  `currentPageCanvas` leave a page's frames out until it is ready (`pageReady`), the Stage says "Loading page…"
+  and fits the page once it is there (a fly-to a frame there glides to its box at once and keeps it). Work on
+  frames that may be elsewhere waits for their pages (`loadPages`; `loadFramePages` follows each frame to the
+  page it is on, and rejects if one is deleted or the canvas changes): a client-drawn export of a frame not on
+  screen (`frameRaster.ts`), undo and redo of an HTML or layer-name step and deleting a frame (`history.ts`, so
+  undo brings back the real design); `copyFrames` copies nothing while one's page is on its way, the Inspector's
+  HTML field is read-only and empty until then, and `api.updateFrame` refuses HTML for a frame whose page is
+  not ready, so a blank or stale copy is never saved.
+  A join without `pagesOnDemand` (the native apps, a tab on an older bundle) is sent the whole canvas and every
+  frame's HTML, and pins every page while it is in the room. Tests: `pageLoadingHttp.test.ts`,
+  `pageLoadingBrowser.test.ts` (fixture `tests/fixtures/pageLoading.html`, the room played by the test), `pageWaits.test.ts`, `deletePageLoading.test.ts`,
+  `inspectorPageLoading.test.tsx`.
 - Automations (`shared/automations.ts`, `server/automations.ts`) support schedules and
   approval triggers scoped to one canvas. The five-second worker groups up to ten signed-off
   frames per run. `automation_approvals` retains dispatch receipts independently of the
@@ -756,7 +1041,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   it selects the new shapes only if the selection and page are still the ones it started from. Tests: `canvasGroups.test.ts`. A
   click picks the outermost canvas group around the hit, a double-click on a picked group goes one
   level in, and with a layer inside picked clicks pick its siblings (`groupLevel`); comments still
-  pin to the element under the pointer. Drops (`frameDropRuntime.ts`, canvas drags of layers and
+  pin to the element under the pointer. Drops (`src/frame-runtime/drop.ts`, canvas drags of layers and
   of shapes on the frame, and Layers panel moves through `layerPlacement`): into a flex or grid box
   an absolute layer becomes a flow item; into a box that places its layers by hand (`freeform`:
   the body, a canvas group, or a box already holding absolute layers, with nothing else in flow)
@@ -783,8 +1068,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   custom properties, as one `<style data-doop-carried>`, every rule scoped through a
   `data-doop-carried-scope` mark on the moved root so the destination's own layers keep their
   look); copy/paste across frames carries it the same way. Tests: `layerTransfer.test.ts`, `layersDragAcross.test.tsx`, `styleCarry.test.ts`.
-- A vector's stroke spills past its box, as in Figma (`src/lib/frameBleed.ts`, `bleed` in
-  `frameRuntime.ts`): a drawn path's `<svg>` paints its overflow (a runtime sheet), and a standalone
+- A vector's stroke spills past its box, as in Figma (`src/lib/frameBleed.ts`,
+  `src/frame-runtime/bleed.ts`): a drawn path's `<svg>` paints its overflow (a runtime sheet), and a standalone
   shape's iframe, which can paint nothing past its own edge, reaches a margin past the frame on every
   side. The runtime asks for it (`doop:bleed-want`, half of the widest stroke past the box through the
   shape's transform, a miter join or square cap further, in 16px steps up to 1024) and insets its body
@@ -873,7 +1158,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   anywhere else on it moves the value by the share of the width travelled (never jumping to the
   pointer); a click still types, mouse and pen only. Tests: `inspectorScrub.test.tsx`,
   `valueSlide.test.tsx`.
-- Frame fill (`FrameFillSection` in `Inspector.tsx`, `rootFill` in `frameRuntime.ts`): the frame
+- Frame fill (`FrameFillSection` in `Inspector.tsx`, `rootFill` in `src/frame-runtime/inspect.ts`): the frame
   Inspector has a Fill section, as a Figma frame does, and it is the element panel's own
   (`FillSection` in `ElementPanel.tsx`: colour, opacity, token binding, image fill). It edits the
   background of the root element that paints the frame, read live through `doop:root-fill`:
@@ -1089,9 +1374,20 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   instance is full markup marked `data-doop-instance`, so frame consumers need no changes. Every
   frame write passes `prepareFrameHtml` (`server/components.ts`): `<doop-use>` expands, a changed main
   becomes a revision, instances reconcile against the revision they were rendered from
-  (`server/componentEngine.ts`) and upgrade. `actions.propagateComponents` carries a change across the
-  canvas. The components pass runs first on every write, then `withLibraryFaces`, so an expanded
-  `<doop-use>` naming a library family gets its face. Agents read and write the short form
+  (`server/componentEngine.ts`) and upgrade. A frame's row holds an instance as a reference, rendered
+  from its component when the frame is read (Compact frame storage, under Design tokens), so a changed
+  main rewrites no frame: the queue (`server/propagation.ts`, `actions.queuePropagation`) renders the
+  frames in memory again, one per tick, and loads or holds no canvas for it. The components pass runs
+  first on every write, then `withLibraryFaces`, so an expanded
+  `<doop-use>` naming a library family gets its face. A component's stylesheet and head tags are
+  composed into a frame where it is rendered, not stored in it (Lean frame storage, under Design
+  tokens), so a change to its rules alone writes no frame using it. A definition's `renderRev`
+  (`components.render_rev`, migration `0063_component_render_rev`, null meaning `rev`; set by
+  `store.saveComponent`) is the revision its template or props last changed at: instances are
+  marked with it, a rules-only revision raises `rev` alone, "behind" everywhere (a frame read from
+  storage, propagation) means a mark older than `renderRev`, and `stateAtRev` finds the base for a stale
+  save by the span of revisions (`renderRev`..`rev`) a kept state covers, so rules-only revisions
+  using up the 20 kept never strand an instance. Agents read and write the short form
   (`get_frame`, `edit_frame_html`); tools live once in `server/componentTools.ts` for MCP and the
   resident agent. `get_component_preview` and the resident's `screenshot_component` show the default
   instance, or compare selected prop values in one image (up to 12 combinations). Omitted props keep
@@ -1100,7 +1396,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   or a double-click on its name in that tab, or from its main's Layers row (`renameComponent`; instances are
   linked by id, so they follow). As in Figma, renaming an instance's row names that layer
   alone (`data-doop-name`, kept as an override of that instance, still linked). Stored in `components`
-  (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
+  (migration `0052_components`), one small row per definition; its earlier revisions are rows of
+  `component_revisions` (migration `0062_component_revisions`, backfilled from the retired inline
+  `components.history` column, which a later migration drops): inserted once, never updated, the
+  newest 20 kept, written by `persist.saveComponent` inside the component's write queue and loaded
+  at boot into `ComponentDef.history` for the stale-save merge. Browsers get a `WireComponentDef`
+  (no `history`) in `init`, `component` messages and REST;
+  `GET /api/canvases/:id/components/:componentId/revisions` lists them. Tests:
+  `componentRevisions.test.ts`, `componentRevisionsHttp.test.ts`. Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`. A bare
   `data-doop-prop="name"` binds an element's text, except where there is none: on `img`, `source`,
   `video`, `audio`, `iframe` and `embed` it binds `src`, on `input` its `value` (`parseBindings`
@@ -1124,7 +1427,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`. A component's CSS is read with CSS escapes honoured (Tailwind's `\'` in
   `[class*='size-']` is part of a class name, not a string); a sheet that still cannot be read to the
   end (a string or block left open, text outside a rule) is reported as `css_not_read` with where it
-  went wrong, beside `css_not_kept`. Tests: `componentCssEscapes.test.ts`.
+  went wrong, beside `css_unmatched`. The CSS written for a component (its `data-doop-component-source`
+  block) is kept apart from the page's: a rule of it naming nothing in the main is kept, scoped by
+  its subject, when it is anchored to the component (a state, a script-added element), and left out
+  as `css_not_kept` when not (`extractComponentCss`'s `own`, `sortUnmatched`, #517). Tests: `componentCssEscapes.test.ts`,
+  the state and script-added cases in `componentTools.test.ts`.
 - Component system first (`SYSTEM_FIRST`, `COMPOSE_CHECK` in `server/guide.ts`): the guide opens
   with a must-do list (tokens, then a component system set up the way a designer sets up a Figma
   file, then screens composed from it; themes are tokens, never a copied frame), the brief creates
@@ -1185,11 +1492,13 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `workspaceLibraries.test.tsx`, `libraryResume.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
-  `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
+  `shared/prototype.ts`, whose parser the frame runtime bundles too (`src/frame-runtime/proto.ts`). `PrototypePlayer.tsx`
   (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions, under the
-  desktop tab strip (`--app-inset`), scaled by the viewer's pick (actual size, responsive, fit width,
+  desktop tab strip (`--app-inset`), its controls in a bar above the screens (never over the design), scaled by the viewer's pick (actual size, responsive, fit width,
   fit, fill; `screenLayout`, remembered under `doop:proto-scaling`); the
-  Prototype tab and `PrototypeOverlay.tsx` edit and draw them; MCP has `get_prototype` and
+  Prototype tab and `PrototypeOverlay.tsx` edit and draw them (every link while no frame is
+  selected; with one selected, or an element picked in it, only the links into and out of it, as
+  Figma does); MCP has `get_prototype` and
   `set_prototype_start`. `tests/prototypeBrowser.test.ts` drives the player in Chromium.
 
 ## 5. Security and Secrets
@@ -1242,16 +1551,26 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   policy cases in `authFormBrowser.test.ts`.
 
 - MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
-  (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; the plugin neither rotates nor revokes
-  them). A daily prune deletes expired token rows but keeps the newest per user and client,
-  since `allowance.ts` reads any row as proof an agent once connected.
+  (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; a refresh issues a new refresh token in a
+  new row and never revokes the old one, which stays valid until it expires). A daily prune
+  deletes expired token rows but keeps the newest per user and client, since `allowance.ts` reads
+  any row as proof an agent once connected. Consent (`server/mcpConsent.ts`, a plugin of before
+  hooks ahead of `mcp()`): the plugin's authorize shows `/oauth/consent` only on `prompt=consent`
+  and registration is open, so `/mcp/authorize` is marked `prompt=consent` unless this person
+  already approved this client for every requested scope (`oauth_consent` rows, written when they
+  press Connect), and always when signed out; `/mcp/token` refuses a code still awaiting approval
+  (the pending request is stored under the consent page's own code), and `/oauth2/consent`
+  approves only for the person who made the request. Tests: `mcpConsent.test.ts`.
 
 ## 6. Build and Dependency Management
 
 - Canvas access: `canvasRole` in `server/access.ts` gives owners, members and workspace members
   edit, and share-link visitors the link's level (`none` / `view` / `comment` / `edit`). REST,
   the WebSocket room and MCP gate reads, comments and writes on it separately; spec in
-  `.context/specs/share-link-roles.md`.
+  `.context/specs/share-link-roles.md`. A workspace's admins can switch link sharing off
+  (`workspaces.link_sharing`, migration 0065): every link in it reads as `none`, its canvases go
+  private and leave the Community gallery, and new links and listings are refused
+  (`link_sharing_off`).
 
 - Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
 --frozen-lockfile` in CI.
@@ -1284,6 +1603,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 ## 8. CI/CD and Delivery
 
 - GitHub Actions:
+  - Runners: Blacksmith (`doop-design` org, app at app.blacksmith.sh). CI on
+    `blacksmith-4vcpu-ubuntu-2404` (the trivial gates on 2 vCPU), the macOS desktop, iOS and Android
+    builds on `blacksmith-12vcpu-macos-*`, the Linux desktop build on `blacksmith-4vcpu-ubuntu-2204`.
+    Windows builds, `cla.yml`, `release-please.yml` and the desktop `release` job stay on GitHub's
+    runners (Blacksmith Windows is in beta; the rest are seconds long). `actions/cache` and the
+    setup actions' caches go to Blacksmith's cache transparently; no `useblacksmith/*` actions.
   - `.github/workflows/ci.yml` - gates `typecheck`, `lint` + `format:check` + `doc-lint`, `build`
     and `test` (four vitest shards) as parallel jobs on push to `main` and on PRs, cancelling
     superseded PR runs; a separate job lints the PR title with commitlint (PRs land on
@@ -1324,6 +1649,19 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
+- Frame runtime (`src/frame-runtime/`): the script every frame iframe runs (morphing posted HTML in,
+  hit testing, text editing, styles, the key relay, prototype triggers), written as TypeScript modules
+  and type-checked and linted with the rest of `src/`. `vitePlugin.ts` (registered in `vite.config.ts`,
+  so dev, `vite build`, vitest, the fixture build and Storybook all get it) bundles `main.ts` with
+  esbuild into one strict IIFE served as `virtual:frame-runtime`, and `FRAME_BOOTSTRAP`
+  (`src/lib/frameRuntime.ts`) inlines it in each frame's `srcdoc`: frames stay sandboxed
+  (`allow-scripts`, no same origin), so the script is never loaded from Doop's origin. Every module
+  only declares; `main.ts` sets everything up in one order, since listeners on one target run in the
+  order they were added. `channel.ts` pins the intrinsics the key relay and the command check rely on
+  when it is evaluated, before any design script runs; the runtime's own timers come from
+  `timers.ts`. The dev server rebuilds the script when one of its sources changes. Tests:
+  `frameRuntimeBuild.test.ts`, `frameRuntimeCss.test.ts` and the `*Browser.test.ts` files that drive
+  frames.
 - Chromium shell (the macOS app): `desktop/src-tauri-chromium` builds the same sources (its
   `[[bin]]` and build script point into `desktop/src-tauri`) on Tauri 3.0.0-alpha.5 with
   `tauri-runtime-cef` 3.0.0-alpha.6 (CEF 154, Chromium 154), so frame iframes render out of the

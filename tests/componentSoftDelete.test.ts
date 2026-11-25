@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveActivity: () => {},
@@ -22,6 +23,7 @@ import { buildMcpServer } from '../server/mcp.ts'
 import { execTool, newRunState, RESIDENT_TOOL_NAMES } from '../server/resident.ts'
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
+import { settleIdleStreams } from '../server/canvasWrites.ts'
 import * as propagation from '../server/propagation.ts'
 import { blankComponent } from '../server/components.ts'
 import {
@@ -40,6 +42,7 @@ import {
 } from '../server/componentActions.ts'
 import { COMPONENT_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
+import { renderedHtml } from './rendered.ts'
 import type { Actor } from '../shared/types.ts'
 
 const OWNER = 'owner-soft-delete'
@@ -48,7 +51,7 @@ const actor = { name: 'Tester', kind: 'user', color: '#000', clientId: 'x' } as 
 const doc = (body: string, css = '') =>
   `<!doctype html><html><head><style>${css}</style></head><body>${body}</body></html>`
 
-const framed = (id: string) => store.getFrame(id)!.html
+const framed = renderedHtml
 const current = (canvasId: string, id: string) => store.getComponents(canvasId).find((d) => d.id === id)!
 
 /** A Button, a Card built from it, and pages using each. */
@@ -93,7 +96,7 @@ function setup(pages = 6) {
 }
 
 const allHtml = (canvasId: string) =>
-  Object.fromEntries(store.getCanvas(canvasId)!.frames.map((frame) => [frame.id, frame.html]))
+  Object.fromEntries(store.getCanvas(canvasId)!.frames.map((frame) => [frame.id, framed(frame.id)]))
 
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -472,7 +475,7 @@ describe('detaching every instance', () => {
     await propagation.whenIdle()
     expect(framed(streaming.id)).toContain(` ${INSTANCE_ATTR}="${button.id}"`)
 
-    actions.expireIdleStreams(Date.now() + 60 * 60_000)
+    await settleIdleStreams(Date.now() + 60 * 60_000)
     await propagation.whenIdle()
     expect(framed(streaming.id)).not.toContain(` ${INSTANCE_ATTR}="${button.id}"`)
     expect(framed(streaming.id)).toContain('Left')

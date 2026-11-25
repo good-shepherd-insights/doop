@@ -40,7 +40,7 @@ in `.github/actions/setup-desktop`:
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
   of the Chromium shell with `desktop/scripts/macos-universal.sh` (below), `nsis-windows` builds
   `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
-  x64 AppImage, .deb and .rpm on `ubuntu-22.04` (the oldest runner, for a low glibc floor) with
+  x64 AppImage, .deb and .rpm on Ubuntu 22.04 (`blacksmith-4vcpu-ubuntu-2204`, the oldest image, for a low glibc floor) with
   `bunx tauri build --bundles deb,rpm,appimage`, and a final `release` job (`needs` all three)
   attaches them to one GitHub Release - so a tag is never published with an installer missing.
 - The AppImage is repacked after the build by `desktop/scripts/appimage-drop-wayland.sh` (pinned
@@ -147,6 +147,19 @@ tools, resources, OAuth and reconnecting against a fresh Doop server. Before rel
 also install it in Claude Desktop on macOS and Windows. Installation, build and release
 notes live in [`claude-extension/README.md`](../claude-extension/README.md). No directory
 submission or publication is performed by the build.
+
+## VS Code extension
+
+`vscode-extension/` is the Doop extension for VS Code and its forks (see its README), published as `doop.doop` by
+`.github/workflows/vscode-extension.yml`. Bump `version` in `vscode-extension/package.json`, merge, then push the
+tag `vscode-v<version>`: the workflow checks the tag matches, builds the VSIX, publishes it to the Visual Studio
+Marketplace (`VSCE_PAT` secret: an Azure DevOps token with Marketplace → Manage, all accessible organizations) and
+Open VSX, which Cursor, Windsurf and VSCodium read (`OVSX_PAT` secret), and attaches it to a GitHub Release. A store
+whose secret is missing is skipped with a warning. PRs touching the extension and manual runs build it and upload
+the VSIX as an artifact. The publisher (`doop` on marketplace.visualstudio.com/manage) and the Open VSX namespace
+(`ovsx create-namespace doop`) are made by hand, once. The extension id is also `EDITOR_EXTENSION_ID` in
+`shared/editorConnect.ts`, which the server checks sign-in links against. The server routes it needs (`/editor/*`)
+ship with the web app, so deploy the server before tagging.
 
 ## Codex desktop setup
 

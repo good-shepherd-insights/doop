@@ -14,6 +14,7 @@ import {
 import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
+import type { StorybookRunResult, StorybookSourceComponent } from '../../shared/storybookSource.ts'
 import type {
   ComponentCode,
   ComponentDef,
@@ -124,6 +125,9 @@ export const workspaces = pgTable('workspaces', {
   /** who may publish to the workspace's component library: 'admins' (owner and
    *  admins only); null is everyone who can edit the library canvas */
   libraryPublish: text('library_publish'),
+  /** 'off': no canvas in it may be shared by link or listed in the Community
+   *  gallery; null allows both (each canvas's owner decides) */
+  linkSharing: text('link_sharing'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
@@ -249,6 +253,28 @@ export const syncKeys = pgTable(
     lastUsedAt: bigint('last_used_at', { mode: 'number' }),
   },
   (t) => [index('sync_keys_canvas_idx').on(t.canvasId), index('sync_keys_secret_idx').on(t.secret)],
+)
+
+/** A Storybook a canvas imported components from, kept so it can be synced again
+ *  (.context/specs/storybook-import.md, "Sync"). One per canvas and Storybook URL; cold path,
+ *  read when someone imports or syncs. */
+export const storybookSources = pgTable(
+  'storybook_sources',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    url: text('url').notNull(),
+    /** the components picked, and what each became */
+    components: jsonb('components').$type<StorybookSourceComponent[]>().notNull(),
+    /** tokens this source made, which a sync may update (any other token of the name is left alone) */
+    tokens: jsonb('tokens').$type<string[]>().notNull(),
+    /** the last run's outcome per component, for the import section */
+    lastResult: jsonb('last_result').$type<StorybookRunResult | null>(),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    syncedAt: bigint('synced_at', { mode: 'number' }),
+  },
+  (t) => [uniqueIndex('storybook_sources_canvas_url_idx').on(t.canvasId, t.url)],
 )
 
 /** Link hotspots a synced page declares: where each same-app link sits in the
@@ -593,8 +619,7 @@ export const guidelines = pgTable(
 
 /** Reusable designs. Keyed per canvas: a copied canvas keeps its ids, so the
  *  instance markers in its copied frames still point at the right rows. Mirrored
- *  in memory like guidelines. `history` holds recent revisions inline because
- *  merging a stale save needs them synchronously. */
+ *  in memory like guidelines. Earlier revisions are rows of `component_revisions`. */
 export const components = pgTable(
   'components',
   {
@@ -609,10 +634,14 @@ export const components = pgTable(
     props: jsonb('props').$type<ComponentProp[]>().notNull(),
     slots: jsonb('slots').$type<ComponentSlot[]>().notNull(),
     rev: integer('rev').notNull(),
+    /** `ComponentDef.renderRev`: the revision instances are marked with. Null means `rev` */
+    renderRev: integer('render_rev'),
     mainFrameId: text('main_frame_id'),
     code: jsonb('code').$type<ComponentCode>(),
     source: jsonb('source').$type<NonNullable<ComponentDef['source']>>(),
-    history: jsonb('history').$type<ComponentSnapshot[]>().notNull(),
+    /** Retired: revisions live in `component_revisions`. Neither read nor written; kept, with
+     *  a default, so the release before this one still runs on the table. A later migration drops it. */
+    legacyHistory: jsonb('history').$type<ComponentSnapshot[]>().notNull().default([]),
     /** 'deleted' is a soft delete: the row stays, so instances keep what they were
      *  rendered from and the component can be restored */
     status: text('status').$type<'active' | 'deleted'>().notNull().default('active'),
@@ -623,6 +652,27 @@ export const components = pgTable(
     updatedBy: text('updated_by').notNull(),
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.id] })],
+)
+
+/** A component's earlier states, one row per revision: inserted once, never updated, and
+ *  pruned to the newest `MAX_COMPONENT_HISTORY` per component. Mirrored in memory as
+ *  `ComponentDef.history`, because merging a stale save needs them synchronously. */
+export const componentRevisions = pgTable(
+  'component_revisions',
+  {
+    canvasId: text('canvas_id').notNull(),
+    componentId: text('component_id').notNull(),
+    rev: integer('rev').notNull(),
+    /** `ComponentSnapshot.renderRev`; null means `rev` */
+    renderRev: integer('render_rev'),
+    template: text('template').notNull(),
+    rawCss: text('raw_css').notNull(),
+    head: jsonb('head').$type<string[]>().notNull(),
+    props: jsonb('props').$type<ComponentProp[]>().notNull(),
+    savedAt: bigint('saved_at', { mode: 'number' }).notNull(),
+    savedBy: text('saved_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.componentId, t.rev] })],
 )
 
 /** What a workspace library has published: one snapshot per component of a

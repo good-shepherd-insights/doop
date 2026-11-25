@@ -1,5 +1,8 @@
 import type { Frame } from '../../shared/types'
 import { snapshotFrame } from './frameBridge'
+import { composeFrame } from './frameCompose'
+import { useStore } from './store'
+import { loadFramePages } from './ws'
 
 /**
  * Render a frame to an image in this browser: the document is inlined into
@@ -45,9 +48,17 @@ export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise
   /* an unmounted frame renders from its saved HTML; a mounted one whose
      pixels cannot all be read is for the server */
   if (snapshot && snapshot.html === null) throw new Error('the frame cannot be drawn here')
-  const html = snapshot?.html ?? frame.html
+  const html = snapshot?.html ?? (await savedHtml(frame))
   const svg = await inlineDocument(html, { width: frame.width, height: frame.height, signal })
   return drawSvg(svg, { width: frame.width, height: frame.height, ...opts })
+}
+
+/** The HTML of a frame that is not on screen: read with its page first when
+ *  this browser has not loaded that page, so it never draws a blank or old copy. */
+async function savedHtml(frame: Frame): Promise<string> {
+  await loadFramePages([frame.id])
+  /* the store's source, as a document of its own: the canvas's styles composed in */
+  return composeFrame(useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html ?? frame.html)
 }
 
 /** The frame as an SVG file: the same self-contained document the raster
@@ -58,7 +69,7 @@ export async function frameSvg(frame: Frame, opts: { clip?: ClipRect; signal?: A
   const signal = opts.signal ?? AbortSignal.timeout(RESOURCE_FETCH_MS)
   const snapshot = await snapshotFrame(frame.id)
   if (snapshot && snapshot.html === null) throw new Error('the frame cannot be drawn here')
-  const svg = await inlineDocument(snapshot?.html ?? frame.html, {
+  const svg = await inlineDocument(snapshot?.html ?? (await savedHtml(frame)), {
     width: frame.width,
     height: frame.height,
     signal,
@@ -147,7 +158,11 @@ const MEDIA_RULE = 4
  *  aspect ratio, the person's colour scheme) is judged as the canvas does. */
 class FrameViewport {
   private frame: HTMLIFrameElement | null = null
-  constructor(private readonly size: { width: number; height: number }) {}
+  private readonly size: { width: number; height: number }
+
+  constructor(size: { width: number; height: number }) {
+    this.size = size
+  }
 
   /** before url()s are inlined, so no data: URL is ever rewritten */
   units(css: string): string {
@@ -403,11 +418,14 @@ function isInlineUrl(ref: string): boolean {
  *  export, and the server's renderer can still load it. */
 class ResourceCache {
   private readonly pending = new Map<string, Promise<Blob>>()
-  constructor(
-    readonly signal: AbortSignal,
-    /** settles each imported stylesheet as `inlineDocument` does the page's */
-    private readonly viewport: FrameViewport | null = null,
-  ) {}
+  readonly signal: AbortSignal
+  /** settles each imported stylesheet as `inlineDocument` does the page's */
+  private readonly viewport: FrameViewport | null
+
+  constructor(signal: AbortSignal, viewport: FrameViewport | null = null) {
+    this.signal = signal
+    this.viewport = viewport
+  }
 
   private blob(url: string): Promise<Blob> {
     let pending = this.pending.get(url)

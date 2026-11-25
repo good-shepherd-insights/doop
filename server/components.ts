@@ -1,3 +1,4 @@
+import { rendersWhole } from './frameRest.ts'
 import { customAlphabet } from 'nanoid'
 import { serializeOuter } from 'parse5'
 import {
@@ -6,25 +7,24 @@ import {
   HEAD_ATTR,
   INSTANCE_ATTR,
   MAX_COMPONENT_HISTORY,
-  OVERRIDES_ATTR,
-  PART_ATTR,
-  PROPS_ATTR,
-  REV_ATTR,
   USE_TAG,
   isDeleted,
+  isHollow,
   type ComponentDef,
   type ComponentIssue,
   type ComponentProp,
 } from '../shared/components.ts'
-import { extractComponentCss, frameHeadTags, frameStylesheets } from './componentCss.ts'
+import { componentClosure } from '../shared/frameCompose.ts'
+import { componentSourceCss, extractComponentCss, frameHeadTags, frameStylesheets } from './componentCss.ts'
 import {
   attrOf,
+  contextOfDefs,
   derivePropsAndSlots,
   expandUses,
   findMarked,
-  holdsHollow,
+  prepareInstances,
   renderInstance,
-  reconcileInstance,
+  reviveLostUses,
   setAttr,
   splice,
   stampParts,
@@ -37,6 +37,7 @@ import {
 } from './componentEngine.ts'
 import { adoptFromLibrary, findInLibraries, LibraryAdoptError } from './componentLibrary.ts'
 import { withHostedIcons } from './iconProxy.ts'
+import { env } from './env.ts'
 import { store } from './store.ts'
 import { noteCanvas } from './workBudget.ts'
 import { WriteRefusedError } from './writeRefusal.ts'
@@ -72,31 +73,11 @@ function hostedForm<T extends Revision>(def: T | undefined): T | undefined {
 }
 
 export function contextFor(canvasId: string, adoption?: LibraryAdoption): EngineContext {
-  const defs = () => store.getComponents(canvasId)
-  const issues: ComponentIssue[] = []
-  /* an id is exact, deleted or not: markup already on the canvas points at it. A name means
-     the component in use; a deleted one answers to its name only when nothing else has it,
-     so that asking for it says "deleted" rather than "unknown" */
-  const local = (ref: string) => {
-    const wanted = ref.trim().toLowerCase()
-    const named = defs().filter((def) => def.name.toLowerCase() === wanted)
-    return defs().find((def) => def.id === ref) ?? named.find((def) => !isDeleted(def)) ?? named[0]
-  }
+  const local = contextOfDefs(() => store.getComponents(canvasId))
+  const issues = local.issues
   const find = (ref: string) =>
-    hostedForm(local(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined))
-  return {
-    find,
-    atRev(id, rev) {
-      const def = defs().find((candidate) => candidate.id === id)
-      if (!def) return undefined
-      if (def.rev === rev) return hostedForm(def)
-      const snapshot = def.history.find((entry) => entry.rev === rev)
-      return hostedForm(
-        snapshot ? { id, name: def.name, rev, template: snapshot.template, props: snapshot.props } : undefined,
-      )
-    },
-    issues,
-  }
+    hostedForm(local.find(ref) ?? (adoption && ref ? fromLibrary(canvasId, ref, adoption, issues) : undefined))
+  return { ...local, find, atRev: (id: string, rev: number) => hostedForm(local.atRev(id, rev)) }
 }
 
 /** Nothing on the canvas has this name: its workspace library may. A local
@@ -147,21 +128,7 @@ function touchesComponents(html: string): boolean {
 }
 
 function closureOf(ids: Iterable<string>, canvasId: string): ComponentDef[] {
-  const defs = store.getComponents(canvasId)
-  const seen = new Map<string, ComponentDef>()
-  const stack = [...ids]
-  for (let id = stack.pop(); id; id = stack.pop()) {
-    if (seen.has(id)) continue
-    const def = defs.find((candidate) => candidate.id === id)
-    if (!def) continue
-    seen.set(id, def)
-    for (const match of def.template.matchAll(/component="([^"]+)"/g)) {
-      const nested = defs.find((candidate) => candidate.id === match[1] || candidate.name === match[1])
-      if (nested) stack.push(nested.id)
-    }
-  }
-  /* dependencies first, so a nested component's rules come before the ones built on them */
-  return [...seen.values()].reverse()
+  return componentClosure(ids, store.getComponents(canvasId))
 }
 
 /** Would a template using these components put `id` inside itself? */
@@ -184,6 +151,7 @@ export function bumpRevision(def: ComponentDef, by: string): ComponentDef {
     ...def.history,
     {
       rev: def.rev,
+      ...(def.renderRev !== undefined ? { renderRev: def.renderRev } : {}),
       template: def.template,
       rawCss: def.rawCss,
       head: def.head,
@@ -232,6 +200,8 @@ function prepareMains(
   let sheetCache: string | undefined
   let headCache: string[] | undefined
   const sheet = () => (sheetCache ??= frameStylesheets(html))
+  let sourceCache: Map<string, string> | undefined
+  const sources = () => (sourceCache ??= componentSourceCss(html))
   const headTags = () => [...(headCache ??= frameHeadTags(html))]
   for (const found of findMarked(html, COMPONENT_ATTR)) {
     const id = attrOf(found.el, COMPONENT_ATTR) ?? ''
@@ -275,7 +245,7 @@ function prepareMains(
       continue
     }
     const variants = def.props.filter((prop) => prop.type === 'enum').map((prop) => `data-${prop.name}`)
-    const extracted = extractComponentCss(sheet(), found.el, id, variants)
+    const extracted = extractComponentCss(sheet(), found.el, id, variants, sources().get(id))
     const css = withHostedIcons(extracted.css)
     const rawCss = withHostedIcons(extracted.rawCss)
     const head = headTags()
@@ -326,34 +296,6 @@ export function rederiveFromMains(
   return { html: mains.html, saved: [...mains.changed, ...mains.moved] }
 }
 
-function prepareInstances(html: string, ctx: EngineContext) {
-  const edits: { start: number; end: number; text: string }[] = []
-  for (const found of findMarked(html, INSTANCE_ATTR)) {
-    const id = attrOf(found.el, INSTANCE_ATTR) ?? ''
-    const def = ctx.find(id)
-    if (!def) {
-      /* its component was deleted, or this came from another canvas: plain markup */
-      for (const name of [INSTANCE_ATTR, REV_ATTR, PROPS_ATTR, OVERRIDES_ATTR]) setAttr(found.el, name, null)
-      edits.push({ start: found.start, end: found.end, text: serializeOuter(found.el) })
-      continue
-    }
-    /* its component was deleted: the instance keeps the markup it has, untouched. So does one
-       holding an instance of a hollow component: rendered again, that instance would be lost */
-    if (isDeleted(def) || holdsHollow(found.el, ctx)) continue
-    const before = serializeOuter(found.el)
-    const state = reconcileInstance(found.el, ctx)
-    if (!state) continue
-    /* only a whole write gets here: nothing more is coming for the content it holds */
-    const rendered = renderInstance(def, def, state.overrides, state.instanceId, { ctx, stack: [] })
-    if (!rendered) continue
-    /* the key it has is its place in what holds it (a main), not the component's own root key */
-    setAttr(rendered, PART_ATTR, attrOf(found.el, PART_ATTR) ?? null)
-    const after = serializeOuter(rendered)
-    if (after !== before) edits.push({ start: found.start, end: found.end, text: after })
-  }
-  return edits.length ? splice(html, edits) : html
-}
-
 export interface PreparedHtml {
   html: string
   issues: ComponentIssue[]
@@ -375,6 +317,15 @@ export function prepareFrameHtml(
   priorHtml = '',
   { refuseUnclosed = false }: { refuseUnclosed?: boolean } = {},
 ): PreparedHtml {
+  /* a reference kept as a placeholder (its component could not render when the frame was
+     read, server/frameRest.ts) is a reference again once that component can */
+  incoming = reviveLostUses(incoming, (ref, use) => {
+    const defs = store.getComponents(canvas.id)
+    const def = defs.find((candidate) => candidate.id === ref || candidate.name === ref)
+    /* whole, or not yet: with a nested component still missing, the write would render the
+       rest and record the missing part as hidden for good */
+    return !!def && !isDeleted(def) && !isHollow(def) && rendersWhole(use, defs)
+  })
   if (!touchesComponents(incoming)) {
     const lost = frameId && priorHtml.includes(`${COMPONENT_ATTR}="`)
     const moved = lost ? prepareMains(canvas, frameId, incoming, by, contextFor(canvas.id)).moved : []
@@ -438,9 +389,11 @@ export function dedupeIssues(issues: ComponentIssue[]): ComponentIssue[] {
   })
 }
 
-/** One chunk of a live stream: components render as they arrive, each stylesheet
- *  once and in place, since the head may already have gone by. The last chunk's
- *  full pass moves them where they belong. */
+/** One chunk of a live stream: components render as they arrive. Their stylesheets are
+ *  not the frame's to hold (lean storage): whoever is shown the frame mid-stream composes
+ *  them in (the browser, the renderer, `legacyFrame` for a client that cannot). With
+ *  `DOOP_LEAN_FRAME_STORAGE=false` each goes in once and in place, since the head may
+ *  already have gone by, and the last chunk's full pass moves them where they belong. */
 export function prepareChunk(
   canvas: Canvas,
   chunk: string,
@@ -451,9 +404,11 @@ export function prepareChunk(
   const adoption: LibraryAdoption = { by, added: [] }
   const ctx = contextFor(canvas.id, adoption)
   const expanded = expandUses(chunk, ctx)
-  const styles = closureOf(usedComponentIds(expanded), canvas.id)
-    .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
-    .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)
+  const styles = env.DOOP_LEAN_FRAME_STORAGE
+    ? []
+    : closureOf(usedComponentIds(expanded), canvas.id)
+        .filter((def) => def.css.trim() && !soFar.includes(`${CSS_ATTR}="${def.id}"`))
+        .map((def) => `<style ${CSS_ATTR}="${def.id}">\n${def.css}\n</style>`)
   /* a use expanded here is gone by the last chunk's pass: what it had to say is said now */
   return { html: `${styles.join('\n')}${expanded}`, issues: ctx.issues, adopted: adoption.added }
 }

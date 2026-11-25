@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /* Token writes persist and broadcast like any canvas change; these tests
    only care about what the run counts as delivered, so both are stubbed. */
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},
@@ -22,7 +23,6 @@ const { deliveredWork, execTool, newRunState, tokenWritesIn } = await import('..
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 const actor = () => actions.resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-const run = () => newRunState()
 const call = (name: string, input: unknown) => ({ type: 'tool_use' as const, id: 't1', name, input })
 
 let canvasId: string
@@ -37,11 +37,11 @@ beforeEach(() => {
 
 describe('a run that only writes tokens has delivered its card', () => {
   it('counts nothing before any write', () => {
-    expect(deliveredWork(run())).toBe(false)
+    expect(deliveredWork(newRunState())).toBe(false)
   })
 
   it('counts a token created through create_tokens', async () => {
-    const runState = run()
+    const runState = newRunState()
     const result = await execTool(
       call('create_tokens', { tokens: [{ name: '--color-ink', type: 'color', value: '#111' }] }),
       canvasId,
@@ -54,14 +54,14 @@ describe('a run that only writes tokens has delivered its card', () => {
   })
 
   it('does not count a set_tokens call whose every edit was refused', async () => {
-    const runState = run()
+    const runState = newRunState()
     await execTool(call('set_tokens', { tokens: [{ name: '--missing', value: '#000' }] }), canvasId, actor(), runState)
     expect(runState.tokenWrites).toBe(0)
     expect(deliveredWork(runState)).toBe(false)
   })
 
   it('counts the theme list being set', async () => {
-    const runState = run()
+    const runState = newRunState()
     await execTool(call('set_token_themes', { themes: ['dark'] }), canvasId, actor(), runState)
     expect(deliveredWork(runState)).toBe(true)
   })
@@ -77,7 +77,7 @@ describe('a run that only writes tokens has delivered its card', () => {
   })
 
   it('still counts a frame of the run’s own', () => {
-    const runState = run()
+    const runState = newRunState()
     runState.mutatedFrames.add('f1')
     expect(deliveredWork(runState)).toBe(true)
     runState.sourceFrames.add('f1')

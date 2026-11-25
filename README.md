@@ -7,7 +7,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-111110" alt="License: AGPL-3.0"></a>
   <a href="https://doop.design"><img src="https://img.shields.io/badge/cloud-doop.design-2743EE" alt="Doop Cloud"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-111110" alt="PRs welcome"></a>
-  <a href="https://discord.com/invite/3AUfXjgVe"><img src="https://img.shields.io/badge/chat-Discord-5865F2" alt="Discord"></a>
+  <a href="https://discord.gg/EMvwFq6QAC"><img src="https://img.shields.io/badge/chat-Discord-5865F2" alt="Discord"></a>
 </p>
 
 **[Doop](https://doop.design/?utm_source=github) is the open-source alternative to [Paper.design](https://paper.design) — a multiplayer
@@ -447,8 +447,9 @@ catalog, asked with that account's credential when the picker opens (`server/mod
 `GET /api/model-account/models`): the Codex backend's catalog for a ChatGPT subscription (the
 same list the Codex CLI reads, asked as `CHATGPT_CODEX_CLIENT_VERSION`), OpenAI's and
 Anthropic's `/v1/models`, Gemini's `/v1beta/models`. A newly released model is on the menu
-without an upgrade; the curated entries above sit on top as recommendations, a curated tier the
-account cannot run is left off, and the curated menu alone is served if the provider cannot be
+without an upgrade; the newest generation leads, the curated entries above it within each
+generation as recommendations, every id is spelled the way the curated ones are, a curated tier
+the account cannot run is left off, and the curated menu alone is served if the provider cannot be
 reached. OpenRouter, DeepSeek, Kimi and Kimi Code stay on their curated rosters, whose hand-checked vision
 flags are what the run relies on. DeepSeek and Kimi return their reasoning as `reasoning_content`
 and refuse a tool-calling conversation that leaves it out, so the transport keeps it in the run's
@@ -459,8 +460,9 @@ endpoints are fixed constants: a user-supplied endpoint would be a URL the serve
 context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
 Either way the user picks their **model tier** in Settings from that provider's curated menu — on
-OpenAI, `gpt-6.2-sol` (the default workhorse), `gpt-6-astra` (flagship; on a ChatGPT subscription
-it needs Plus or better), `gpt-5.6-sol`, `gpt-5.6-terra` or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the choice is theirs;
+OpenAI, `gpt-6.2-astra` (the flagship, priciest; on a ChatGPT subscription it runs on supported
+plans, and Enterprise and Edu admins switch it on), `gpt-6.2-sol` (the default workhorse),
+`gpt-6.1-terra` (fast and efficient) or `gpt-6-luna` (cheapest and fastest). They are paying for it, so the choice is theirs;
 `DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL`, `DOOP_AGENT_GEMINI_MODEL`,
 `DOOP_AGENT_DEEPSEEK_MODEL`, `DOOP_AGENT_KIMI_MODEL` and `DOOP_AGENT_KIMI_CODE_MODEL` only set the default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so
@@ -1088,7 +1090,7 @@ The realtime protocol is plain JSON over `/ws`, one room per canvas; its message
 The main entry points (the server has about 70 modules in all):
 
 ```
-server/            Node (tsx) — one process on :4400
+server/            Node 26 (runs the TypeScript directly) — one process on :4400
   index.ts         Express REST API + ws rooms + presence + static serving (prod)
   store.ts         In-memory canvas/frame state (hot path), write-through to the DB
   db/              Drizzle schema + PGlite/Postgres connection + migrations
@@ -1127,7 +1129,7 @@ change them together.
 
 Frame HTML renders in `<iframe sandbox="allow-scripts">` — scripts run, but no same-origin access and
 no reach into the app. Each iframe loads a small bootstrap once; new HTML is `postMessage`d in and
-**DOM-morphed in place** (`src/lib/frameRuntime.ts`), so updates and streaming ticks never white-flash
+**DOM-morphed in place** (`src/frame-runtime/morph.ts`), so updates and streaming ticks never white-flash
 the frame with a full document reload. Changed `<script>`s re-execute; unchanged styles/fonts are
 untouched. The realtime layer is plain JSON over a per-canvas WebSocket room;
 REST/MCP mutations are broadcast to the room by the shared actions layer, so human and agent edits go

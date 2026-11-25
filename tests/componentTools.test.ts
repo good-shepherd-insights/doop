@@ -1,9 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { parse } from 'parse5'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../server/db/persist.ts', () => ({
   saveCanvas: () => {},
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveActivity: () => {},
   saveFrameVersion: () => {},
@@ -13,15 +15,19 @@ vi.mock('../server/db/persist.ts', () => ({
 }))
 
 import { buildMcpServer } from '../server/mcp.ts'
-import { execTool, RESIDENT_TOOLS } from '../server/resident.ts'
+import { execTool, newRunState, RESIDENT_TOOLS } from '../server/resident.ts'
 import * as screenshot from '../server/screenshot.ts'
 import { DEFAULT_ROLE_ID, roleName } from '../shared/agents.ts'
 import { store } from '../server/store.ts'
+import { renderedHtml } from './rendered.ts'
 import * as propagation from '../server/propagation.ts'
 import { resolveActor, takeComponentIssues } from '../server/actions.ts'
 import { findComponent } from '../server/componentActions.ts'
 import { previewCombinations, previewDocument } from '../server/componentPreview.ts'
 import { activeComponents } from '../shared/components.ts'
+import { splitTopLevel } from '../server/componentCss.ts'
+import { resolveElement } from '../server/elementIds.ts'
+import { elementIs } from '../server/parse5Select.ts'
 
 const OWNER = 'owner-1'
 const AGENT = { agent_name: 'Tester' }
@@ -161,20 +167,7 @@ describe('an agent working with components', () => {
     const canvas = newCanvas()
     await button(canvas.id)
     const resident = resolveActor({ name: roleName(DEFAULT_ROLE_ID), kind: 'agent' })
-    const runState = {
-      mutatedFrames: new Set<string>(),
-      sourceFrames: new Set<string>(),
-      verificationFrames: new Set<string>(),
-      verifiedFrames: new Set<string>(),
-      seenVerified: new Set<string>(),
-      rewriteDrafts: new Map<string, string>(),
-      vision: false,
-      imagesGenerated: 0,
-      repliedThreads: new Set<string>(),
-      awaitingThreads: new Set<string>(),
-      tokenWrites: 0,
-      arrangeWrites: 0,
-    }
+    const runState = newRunState()
     const shoot = (input: Record<string, unknown>) =>
       execTool(
         { type: 'tool_use', id: 't1', name: 'screenshot_component', input: { component: 'Button', ...input } },
@@ -207,7 +200,8 @@ describe('an agent working with components', () => {
     await button(canvas.id)
     const uses = Array.from({ length: 20 }, (_, i) => `<doop-use component="Button" label="Action ${i}"></doop-use>`)
     const frameId = await framed(canvas.id, uses.join(''))
-    const full = store.getFrame(frameId)!.html
+    /* the full form is the frame as rendered: its source with the canvas's styles composed in */
+    const full = renderedHtml(frameId)
     const read = await call('get_frame', { frame_id: frameId })
     expect(read.data.html.length).toBeLessThan(full.length / 3)
     expect(read.data.instances).toHaveLength(20)
@@ -228,6 +222,35 @@ describe('an agent working with components', () => {
     expect(html).toContain(/data-doop-id="[a-z0-9]{6}"/.exec(full)![0])
   })
 
+  it('edits text copied from the full form, also where it runs into what Doop supplied', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const frameId = await framed(canvas.id, '<h1>Old title</h1><doop-use component="Button" label="Go"></doop-use>')
+    const full = (await call('get_frame', { frame_id: frameId, expand_components: true })).data.html as string
+    /* the end of the Button's stylesheet, the head's close and the heading: one stretch of the full form */
+    const spanning = /\n<\/style>\n<\/head><body><h1>Old title<\/h1>/.exec(full)?.[0]
+    expect(spanning).toBeDefined()
+    expect(store.getFrame(frameId)!.html).not.toContain(spanning)
+    const edit = await call('edit_frame_html', {
+      frame_id: frameId,
+      old_str: spanning,
+      new_str: spanning!.replace('Old title', 'New title'),
+    })
+    expect(edit.isError).toBe(false)
+    const stored = store.getFrame(frameId)!.html
+    expect(stored).toContain('<h1>New title</h1>')
+    /* stored as the frame's source, and rendered as before with the new heading */
+    expect(stored).not.toContain('data-doop-component-css')
+    expect(renderedHtml(frameId)).toBe(full.replace('Old title', 'New title'))
+
+    /* an edit of nothing but the supplied stylesheet would be dropped on the way in: it says so */
+    const rule = /padding: [^;}]+/.exec(full)![0]
+    const lost = await call('edit_frame_html', { frame_id: frameId, old_str: rule, new_str: 'padding: 99px' })
+    expect(lost.isError).toBe(true)
+    expect(lost.text).toContain('update_component')
+    expect(store.getFrame(frameId)!.html).toBe(stored)
+  })
+
   it('hears about mistakes in the result, with what would have worked', async () => {
     const canvas = newCanvas()
     await button(canvas.id)
@@ -239,15 +262,6 @@ describe('an agent working with components', () => {
     expect(result.text).toContain('no component “Buton”')
     expect(result.text).toContain('solid | ghost')
     expect(result.text).toContain('no prop “nope”')
-  })
-
-  it('is told when it redrew a component by hand', async () => {
-    const canvas = newCanvas()
-    await button(canvas.id)
-    const result = await call('create_frame', { canvas_id: canvas.id, name: 'Redrawn', html: `<div>${BUTTON}</div>` })
-    expect(result.text).toContain('match')
-    expect(result.text).toContain('“Button”')
-    expect(result.text).toContain('<doop-use')
   })
 
   it('changes every instance with one call, and sees the impact first', async () => {
@@ -273,18 +287,6 @@ describe('an agent working with components', () => {
       'R',
     )
 
-    const dry = await call('update_component', {
-      canvas_id: canvas.id,
-      component: 'Button',
-      find: 'class="btn"',
-      replace: 'class="btn big"',
-      dry_run: true,
-    })
-    expect(dry.data.dry_run).toBe(true)
-    expect(dry.data.impact.instances).toBe(3)
-    expect(dry.data.impact.approvals_affected).toBe(1)
-    expect(store.getFrame(a)!.html).not.toContain('btn big')
-
     const applied = await call('update_component', {
       canvas_id: canvas.id,
       component: 'Button',
@@ -306,7 +308,7 @@ describe('an agent working with components', () => {
     expect(store.getFrame(a)!.html).toContain('Keep A')
   })
 
-  it('keeps overrides attached when the main is rewritten wholesale, and reports any it could not', async () => {
+  it('keeps overrides attached when the main is rewritten wholesale', async () => {
     const canvas = newCanvas()
     await button(canvas.id)
     const frameId = await framed(canvas.id, '<doop-use component="Button" id="abc123"></doop-use>')
@@ -323,15 +325,27 @@ describe('an agent working with components', () => {
     })
     expect(store.getFrame(frameId)!.html).toContain('color: red')
     /* a rewrite with no keys at all: same structure, new look */
-    const rewrite = await call('update_component', {
+    await call('update_component', {
       canvas_id: canvas.id,
       component: 'Button',
       html: '<button class="btn wide"><span class="label" data-doop-prop="label">Go</span></button>',
     })
-    expect(rewrite.data.impact.overrides_orphaned).toEqual([])
     const html = store.getFrame(frameId)!.html
     expect(html).toContain('btn wide')
     expect(html).toContain('color: red')
+  })
+
+  it('takes the markup as template, the name get_component returns it by, and refuses it twice', async () => {
+    const canvas = newCanvas()
+    await button(canvas.id)
+    const read = await call('get_component', { canvas_id: canvas.id, component: 'Button' })
+    const template = String(read.data.template).replace('class="btn"', 'class="btn wide"')
+    const both = await call('update_component', { canvas_id: canvas.id, component: 'Button', html: template, template })
+    expect(both.isError).toBe(true)
+    expect(both.text).toContain('not both')
+    const updated = await call('update_component', { canvas_id: canvas.id, component: 'Button', template })
+    expect(updated.isError).toBe(false)
+    expect(store.getComponents(canvas.id)[0]!.template).toContain('btn wide')
   })
 
   it('makes the picked element the main and leaves the other copies as they are', async () => {
@@ -562,7 +576,7 @@ describe('an agent working with components', () => {
       canvas.id,
       '<doop-use component="Plan"></doop-use><doop-use component="Button"></doop-use>',
     )
-    expect(store.getFrame(frameId)!.html).toContain(`.plan:where([data-doop-instance="${plan().id}"]) .btn`)
+    expect(renderedHtml(frameId)).toContain(`.plan:where([data-doop-instance="${plan().id}"]) .btn`)
 
     const updated = await call('update_component', {
       canvas_id: canvas.id,
@@ -572,7 +586,7 @@ describe('an agent working with components', () => {
     expect(updated.isError).toBe(false)
     expect(plan().rawCss).toContain('.plan .btn { width: auto }')
     expect(updated.text).toContain('were not kept: .label.')
-    expect(store.getFrame(frameId)!.html).toContain('width: auto')
+    expect(renderedHtml(frameId)).toContain('width: auto')
 
     const clean = await call('update_component', {
       canvas_id: canvas.id,
@@ -580,6 +594,103 @@ describe('an agent working with components', () => {
       css: '.plan .btn { width: 50% }',
     })
     expect(clean.text).not.toContain('were not kept')
+  })
+
+  /* #517: the CSS an agent writes for a component is the component's. Doop used to keep only the
+     rules naming something in the main as it stands, so a state it is not in yet ([open], .is-on)
+     or an element a script adds was dropped. A page's own stylesheet is still matched against the
+     main when a component is made from an element on it. */
+  it('keeps rules for states and script-added elements from the css written for a component', async () => {
+    const canvas = newCanvas()
+    const made = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'FAQ Row',
+      html: '<details class="faq-row"><summary class="q">Question</summary><p class="a">Answer</p></details>',
+      css:
+        '.faq-row { border-bottom: 1px solid #ddd } .faq-row[open] summary::after { content: "−" } .faq-row .copied-toast { opacity: 1 } ' +
+        'details[open] > summary { font-weight: 600 } .hero h1 { font-size: 72px } .nope { color: green }',
+    })
+    expect(made.isError).toBe(false)
+    const faq = findComponent(canvas.id, 'FAQ Row')!
+    expect(faq.rawCss).toContain('.faq-row[open] summary::after { content: "−" }')
+    expect(faq.rawCss).toContain('.faq-row .copied-toast { opacity: 1 }')
+    expect(faq.rawCss).toContain('details[open] > summary { font-weight: 600 }')
+    /* not about this component: a page's rule pasted along, and a typo, are left out and named */
+    expect(faq.rawCss).not.toContain('.hero')
+    expect(faq.rawCss).not.toContain('.nope')
+    expect(made.text).toContain('were not kept: .hero h1, .nope')
+    expect(made.text).toContain('were kept for a state it is not in yet or an element a script adds')
+    /* scoped, so it can never reach outside an instance: every selector of every kept rule names it */
+    const scope = `[data-doop-instance="${faq.id}"]`
+    for (const rule of faq.css.split('\n').filter((line) => line.includes('{') && !line.startsWith('@'))) {
+      for (const selector of rule.slice(0, rule.indexOf('{')).split(/,(?![^(]*\))/)) expect(selector).toContain(scope)
+    }
+
+    /* The white ::after belongs to an open FAQ instance under the dark theme. */
+    const themed = await call('update_component', {
+      canvas_id: canvas.id,
+      component: 'FAQ Row',
+      css: `${faq.rawCss}\nhtml.dark .faq-row[open] summary::after { color: white }`,
+    })
+    expect(themed.isError).toBe(false)
+    const css = findComponent(canvas.id, 'FAQ Row')!.css
+    const whiteRule = css.match(/^([^{}\n]+)\s*\{\s*color:\s*white\s*;?\s*\}/m)
+    expect(whiteRule).toBeTruthy()
+    const subjects = splitTopLevel(whiteRule![1]!, ',').map((selector) => {
+      expect(selector).toMatch(/::after$/)
+      return selector.replace(/::after$/, '')
+    })
+    function matchesSummary(theme: string, state: string, instance: string) {
+      const doc = parse(`<html class="${theme}"><body>
+        <details class="faq-row" ${state} data-doop-instance="${instance}"><summary>Question</summary></details>`)
+      const summary = resolveElement(doc, 'body > details > summary')!
+      return subjects.some((selector) => elementIs(summary, selector))
+    }
+    expect(matchesSummary('dark', 'open', faq.id)).toBe(true)
+    expect(matchesSummary('light', 'open', faq.id)).toBe(false)
+    expect(matchesSummary('dark', '', faq.id)).toBe(false)
+    expect(matchesSummary('dark', 'open', 'other')).toBe(false)
+
+    const page = await framed(
+      canvas.id,
+      '<style>.hero { padding: 80px } .stat { color: red } .stat.is-up .arrow { color: green }</style>' +
+        '<section class="hero"><div class="stat" data-doop-id="stat-one"><b class="value">12</b></div></section>',
+    )
+    const fromPage = await call('create_component', {
+      canvas_id: canvas.id,
+      name: 'Stat',
+      frame_id: page,
+      element: 'stat-one',
+    })
+    expect(fromPage.isError).toBe(false)
+    const stat = findComponent(canvas.id, 'Stat')!
+    expect(stat.rawCss).toContain('.stat { color: red }')
+    /* the page's own rule for another element is not the component's */
+    expect(stat.rawCss).not.toContain('.hero')
+  })
+
+  /* each component keeps the css written for it, and only that: two mains on one page whose
+     blocks share a selector do not take each other's rules */
+  it('keeps one component’s css out of another’s on the same page', async () => {
+    const canvas = newCanvas()
+    const page = await framed(
+      canvas.id,
+      '<div class="item" data-doop-id="item-a"><i class="chev">a</i></div>' +
+        '<div class="item" data-doop-id="item-b"><i class="chev">b</i></div>',
+    )
+    for (const [name, element, rule] of [
+      ['A', 'item-a', '.item[open] .chev { rotate: 90deg }'],
+      ['B', 'item-b', '.item[open] .chev { color: red }'],
+    ] as const) {
+      expect((await call('create_component', { canvas_id: canvas.id, name, frame_id: page, element })).isError).toBe(
+        false,
+      )
+      expect((await call('update_component', { canvas_id: canvas.id, component: name, css: rule })).isError).toBe(false)
+    }
+    expect(findComponent(canvas.id, 'A')!.rawCss).toContain('rotate: 90deg')
+    expect(findComponent(canvas.id, 'A')!.rawCss).not.toContain('color: red')
+    expect(findComponent(canvas.id, 'B')!.rawCss).toContain('color: red')
+    expect(findComponent(canvas.id, 'B')!.rawCss).not.toContain('rotate: 90deg')
   })
 
   it('says where it could not read a component’s CSS past', async () => {

@@ -75,7 +75,7 @@ import { framePageId } from '../../shared/pages'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 import { withFontFaces } from '../../shared/fonts'
 import { withWebFontLinks } from '../../shared/webFonts'
-import { withTokenBlock } from '../../shared/designTokens'
+import { composeFrame, frameSource, useComposedFrame } from '@/lib/frameCompose'
 import { canvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 
@@ -913,12 +913,17 @@ export const FrameView = memo(function FrameView({
   }
 
   const html = useThrottledValue(frame.html, 150)
+  /* the store holds the frame's source: the canvas's component stylesheets and token
+     values are composed in here, so they follow the store with no frame update */
+  const { html: composed, shared } = useComposedFrame(html, { partial: !!stream })
   const remoteEditor = editors[0]
 
   /* The iframe loads a bootstrap once; HTML is posted in and DOM-morphed in
      place, so updates never white-flash the frame with a full reload. */
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const localHtml = useRef<string | null>(null)
+  /* what the canvas supplied to the document the runtime shows (`shared` of its last post) */
+  const shownShared = useRef<string | null>(null)
   // A posted document is not ready for hit testing until the iframe has
   // acknowledged it. Inline edits already live there and set this on save.
   const htmlRequest = useRef(0)
@@ -934,7 +939,11 @@ export const FrameView = memo(function FrameView({
   /* Private to the bootstrap runtime, established before the first design renders. */
   const runtimePort = useRef<MessagePort | null>(null)
   /* saves a document the runtime serialized after an edit (set below) */
-  const saveEditedRef = useRef<(html: string, discrete: boolean) => void>(() => {})
+  const saveEditedRef = useRef<(html: string, discrete: boolean, edit: number | null) => void>(() => {})
+  /* the saved source of the runtime's last edit when the save changed it (a
+     hosted font's link added), and which edit it was built from: sent back
+     in, the runtime takes it only if it has made no edit since */
+  const savedEdit = useRef<{ html: string; edit: number } | null>(null)
   /* the frame's box, which a relayed wheel's point is mapped through */
   const wheelFrame = {
     width: frame.width,
@@ -958,14 +967,15 @@ export const FrameView = memo(function FrameView({
       if (!iframe?.contentWindow) return
       const relay = ev.data as
         | Partial<KeyRelay>
-        | { event: 'edited'; html?: unknown; discrete?: boolean }
+        | { event: 'edited'; html?: unknown; discrete?: boolean; edit?: unknown }
         | { event: 'settled'; reqId?: unknown }
         | Partial<WheelRelay>
         | undefined
       /* Inspector edits arrive while the panel holds focus. Only keys need
          the iframe to be focused. */
       if (relay?.event === 'edited') {
-        if (typeof relay.html === 'string') saveEditedRef.current(relay.html, relay.discrete === true)
+        if (typeof relay.html === 'string')
+          saveEditedRef.current(relay.html, relay.discrete === true, typeof relay.edit === 'number' ? relay.edit : null)
         return
       }
       if (relay?.event === 'settled') {
@@ -1024,6 +1034,9 @@ export const FrameView = memo(function FrameView({
            one was sent, and send it once the first render has settled (the
            effect below sends it too on the first boot; the second is a no-op) */
         sentCursor.current = null
+        /* and counts its edits from zero again: a save built from the last
+           document's edit is no longer behind anything here */
+        savedEdit.current = null
         window.requestAnimationFrame(() => syncCursorRef.current())
         /* once per document: the ready signal arrives before the design's
            HTML, so only the runtime can be listening for the port */
@@ -1059,13 +1072,19 @@ export const FrameView = memo(function FrameView({
     return () => unregisterFrameWindow(frame.id, win)
   }, [runtimeReady, frame.id])
   useEffect(() => {
-    if (!runtimeReady || editing || suspendPost || html !== frame.html || html === localHtml.current) return
+    if (!runtimeReady || editing || suspendPost || html !== frame.html) return
+    /* the runtime made this document itself (an edit), and the canvas's styles in it are current */
+    if (html === localHtml.current && shared === shownShared.current) return
+    const basis = savedEdit.current?.html === html ? savedEdit.current.edit : undefined
+    savedEdit.current = null
     localHtml.current = null
+    shownShared.current = shared
     const request = ++htmlRequest.current
     noteFrameDocument(frame.id, null)
     let cancelled = false
-    void requestFrame(frame.id, 'doop:html', { html }).then((reply) => {
-      if (!reply || request !== htmlRequest.current) return
+    void requestFrame(frame.id, 'doop:html', { html: composed, basis }).then((reply) => {
+      /* outdated: the runtime has edited since; that edit's save comes back instead */
+      if (!reply || reply.outdated || request !== htmlRequest.current) return
       /* the runtime shows it whether or not this effect is still current */
       noteFrameDocument(frame.id, html)
       if (!cancelled) setRuntimeDocument({ html, request })
@@ -1073,7 +1092,7 @@ export const FrameView = memo(function FrameView({
     return () => {
       cancelled = true
     }
-  }, [runtimeReady, html, frame.html, frame.id, editing, suspendPost])
+  }, [runtimeReady, html, composed, shared, frame.html, frame.id, editing, suspendPost])
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
@@ -1083,7 +1102,16 @@ export const FrameView = memo(function FrameView({
   const pinsShown = useStore((s) => s.viewOptions.comments || s.tool === 'comment')
   /* a pin being dragged stays mounted: its release listeners live on it */
   const draggedPin = useStore((s) => s.commentDrag?.id)
-  const [probe, setProbe] = useState<ProbeHit | null>(null)
+  const [probe, setProbeState] = useState<ProbeHit | null>(null)
+  /* the store's pick when the probe was last set: the probe is only written
+     back into the store (see below) while that pick still stands */
+  const probedOver = useRef<{ frameId: string; selector: string } | null>(null)
+  /** Show `hit` as this frame's probe. Only from an event or a reply, never
+   *  during render: it notes the store's pick it was set over. */
+  function setProbe(hit: ProbeHit | null) {
+    probedOver.current = useStore.getState().selectedElement
+    setProbeState(hit)
+  }
   useEffect(() => {
     // The request also distinguishes a return to previously rendered HTML
     // while a newer document is still being delivered.
@@ -1095,7 +1123,13 @@ export const FrameView = memo(function FrameView({
     )
       return
     let cancelled = false
-    void requestFrame(frame.id, 'doop:context-hit', { x: menuProbe.x, y: menuProbe.y }).then((reply) => {
+    /* a multi-pick goes along: a right-click inside one of its layers is that
+       layer's, so the pick is kept. A single pick is not: the menu targets the
+       layer under the pointer, a cell inside a picked row included */
+    const now = useStore.getState()
+    const picks = now.selectedElement?.frameId === frame.id ? pickedSelectors(now) : []
+    const selected = picks.length > 1 ? picks : []
+    void requestFrame(frame.id, 'doop:context-hit', { x: menuProbe.x, y: menuProbe.y, selected }).then((reply) => {
       const store = useStore.getState()
       const live = store.canvas?.frames.find((f) => f.id === frame.id)
       if (cancelled || menuProbe.request !== menuRequest.current || store.ctxMenu?.frameId !== frame.id) return
@@ -1106,18 +1140,31 @@ export const FrameView = memo(function FrameView({
         ...(hit ? { hit: { snippet: hit.snippet, ...(hit.elementId ? { elementId: hit.elementId } : {}) } } : {}),
       })
       setMenuProbe(null)
-      setProbe(hit ?? null)
       /* a right-click inside a multi-pick keeps the pick, the clicked layer
          its primary, so the menu's commands act on all of it */
       const picked = store.selectedElement?.frameId === frame.id ? pickedSelectors(store) : []
-      /* a shape on the canvas is its frame: the right-click selects it, so a
-         stale frame selection is not what Move to page or Group act on */
-      if (hit && live && standaloneSelector(live) === hit.selector && !store.selectedIds.includes(frame.id)) {
-        store.select(frame.id)
+      const standalone = live ? standaloneSelector(live) : null
+      const wasSelected = store.selectedIds.includes(frame.id)
+      const others = wasSelected && store.selectedIds.length > 1
+      /* a shape among several selected keeps them all, as its Layers row does */
+      if (hit && standalone === hit.selector && others) {
+        setProbe(hit)
+        return
       }
+      /* a shape on the canvas is its frame: the right-click selects it, so a
+         stale frame selection is not what Move to page or Group act on, and a
+         layer inside one (a group's) narrows the selection to its frame, so
+         the menu acts on that layer alone */
+      if (hit && standalone && (!wasSelected || others)) store.select(frame.id)
       if (hit && picked.length > 1 && picked.includes(hit.selector)) {
         store.pickElements(frame.id, [...picked.filter((s) => s !== hit.selector), hit.selector])
-      } else store.setSelectedElement(hit ? { frameId: frame.id, selector: hit.selector } : null)
+      } else if (hit) store.setSelectedElement({ frameId: frame.id, selector: hit.selector })
+      else {
+        /* nothing under the pointer: the pick goes, and its panel with it */
+        store.pickElement(null)
+      }
+      /* set over the pick just made, which it shows */
+      setProbe(hit ?? null)
     })
     return () => {
       cancelled = true
@@ -1333,7 +1380,7 @@ export const FrameView = memo(function FrameView({
      outline never reappears when the frame is picked again */
   useLayoutEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
-    if (!selected) setProbe(null)
+    if (!selected) setProbeState(null)
   }, [selected])
   const [wasSelected, setWasSelected] = useState(selected)
   if (wasSelected !== selected) {
@@ -1354,7 +1401,7 @@ export const FrameView = memo(function FrameView({
   if (requestedThread !== seenThreadRequest) {
     setSeenThreadRequest(requestedThread)
     if (requestedThread) {
-      setProbe(null)
+      setProbeState(null)
       setComposing(false)
       setOpenThread(requestedThread.id)
     }
@@ -1379,6 +1426,12 @@ export const FrameView = memo(function FrameView({
          frame's entire document */
       if (cur?.frameId === frame.id) useStore.getState().setSelectedElement(null)
     } else if (probeSel) {
+      /* the store picked again after this probe was set (⌘G picks the group
+         it made, a Layers row its layer): that pick is the newer one, and the
+         frame resolves it into a probe of its own. A reply that set the probe
+         just before must not take it back. */
+      const over = probedOver.current
+      if (cur?.frameId !== over?.frameId || cur?.selector !== over?.selector) return
       const el = { frameId: frame.id, selector: probeSel }
       /* the Comment tool outlines the element without sliding its properties panel in */
       if (useStore.getState().tool === 'comment') useStore.getState().setSelectedElement(el)
@@ -1404,7 +1457,7 @@ export const FrameView = memo(function FrameView({
      removes the previous element's outline. */
   useLayoutEffect(() => {
     // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
-    if (!wantedSel) setProbe((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
+    if (!wantedSel) setProbeState((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
   }, [wantedSel])
   /* the rest of a multi-element pick: each is outlined like the primary,
      re-located whenever the document changes. A string key keeps the
@@ -1466,6 +1519,11 @@ export const FrameView = memo(function FrameView({
     const live = useStore.getState().selectedElement
     selectReq.current += 1
     if (live?.frameId !== frame.id || live.selector !== wantedSel) return
+    /* a pick made elsewhere (a Layers row, ⌘G's new group, a drag) is newer
+       than a click still waiting on its hit test: that reply must not land
+       after it and take it back, so the click's probe is dropped now rather
+       than when this select answers */
+    cancelProbe()
     selectSel.current = wantedSel
     iframeRef.current?.contentWindow?.postMessage(
       { type: 'doop:select', reqId: selectReq.current, selector: wantedSel },
@@ -1548,7 +1606,8 @@ export const FrameView = memo(function FrameView({
            leaving edit mode keeps the last element selected. A refresh for
            the same element (a save while editing) only updates its outline,
            so it can't take back a pick made in Layers meanwhile. */
-        if (hit) setProbe((p) => (moved || p?.selector === hit.selector ? hit : p))
+        if (hit && moved) setProbe(hit)
+        else if (hit) setProbeState((p) => (p?.selector === hit.selector ? hit : p))
       }
       if (ev.data?.type === 'doop:located' && typeof ev.data.reqId === 'string') {
         if (ev.data.reqId === '__layer-hover__') {
@@ -1573,7 +1632,7 @@ export const FrameView = memo(function FrameView({
         if (ev.data.reqId === '__probe__') {
           /* Refresh both the outline and handle eligibility after style edits. */
           const rect = ev.data.rect as ProbeHit['rect'] | null
-          setProbe((p) => {
+          setProbeState((p) => {
             if (!p || p.selector !== ev.data.selector) return p
             if (!rect) return null
             const box = ev.data.box as ProbeHit['box'] | null
@@ -1614,7 +1673,8 @@ export const FrameView = memo(function FrameView({
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- inline text editing ---- */
-  const canEdit = !!frame.html && !stream && !frame.locked && !readOnly && !/<script/i.test(frame.html)
+  /* a script in the document it shows, a component's framework script included */
+  const canEdit = !!frame.html && !stream && !frame.locked && !readOnly && !/<script/i.test(composed)
 
   async function enterGroup(at: { x: number; y: number }): Promise<boolean> {
     const selected = pickedHere()
@@ -1716,7 +1776,10 @@ export const FrameView = memo(function FrameView({
 
   /* serialized edits stream out of the iframe; save through the human path */
   useEffect(() => {
-    function saveEdited(edited: string, discrete: boolean) {
+    function saveEdited(serialized: string, discrete: boolean, edit: number | null) {
+      /* the runtime's document carries what was composed into it (component stylesheets,
+         token values): the store, the undo history and the server get its source */
+      const edited = frameSource(serialized)
       // The runtime already has this document. Echoing it through the HTML
       // throttle can overwrite a newer style edit still waiting to save.
       localHtml.current = edited
@@ -1727,10 +1790,10 @@ export const FrameView = memo(function FrameView({
          document then differs from the runtime's, so the post effect sends
          it back in and the face loads at once */
       const library = canvasFonts()
-      const canvas = useStore.getState().canvas
-      /* tokens first, so a family named through a font token is seen by the font scan */
-      const withTokens = withTokenBlock(edited, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
-      const html = withWebFontLinks(withFontFaces(withTokens, library), library)
+      /* the font scan reads the composed document, so a family named through a font
+         token or a component's rules is seen; only the faces stay in the source */
+      const html = frameSource(withWebFontLinks(withFontFaces(composeFrame(edited), library), library))
+      savedEdit.current = html !== edited && edit !== null ? { html, edit } : null
       const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
       useStore.getState().patchFrameLocal(frame.id, { html })
       trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
@@ -1848,10 +1911,18 @@ export const FrameView = memo(function FrameView({
            Inspector waits until the menu closes — it must not slide in
            underneath the menu the user just opened */
         const alreadySelected = store.selectedIds.includes(frame.id)
-        /* a right-click inside a group keeps the group, so Delete takes all */
-        if (!alreadySelected || menuKind.current === 'element') select(frame.id)
-        closePopovers()
-        store.pickElement(null)
+        const elementMenu = menuKind.current === 'element'
+        /* a right-click inside a group keeps the group, so Delete takes all;
+           a shape on the canvas is a frame of the group, whichever menu */
+        if (!alreadySelected || (elementMenu && !standaloneSelector(frame))) select(frame.id)
+        /* the element menu keeps the pick and its outline until its hit
+           answers: a right-click inside a multi-pick keeps it (the hit's
+           effect above decides) */
+        if (elementMenu) closeElementPopovers()
+        else {
+          closePopovers()
+          store.pickElement(null)
+        }
         store.openCtxMenu({ frameId: frame.id, deferPanel: !alreadySelected })
       }}
     >
@@ -2066,12 +2137,12 @@ export const FrameView = memo(function FrameView({
               elementMove.moving ? 'cursor-move' : 'cursor-default',
               /* no edge at rest, as in Figma: the artwork meets the canvas
                  directly. A hovered frame wears a soft one-screen-pixel brand ring
-                 (the selected one has its own), a dragged one lifts */
+                 (the selected one has its own); a dragged one wears nothing more
+                 than its selection ring, as in Figma */
               !isCanvasElement(frame.html) &&
-                (dragging
-                  ? 'shadow-pop'
-                  : !selected &&
-                    'hover:shadow-[0_0_0_calc(1px/var(--zoom,1))_color-mix(in_srgb,var(--brand)_55%,transparent)]'),
+                !dragging &&
+                !selected &&
+                'hover:shadow-[0_0_0_calc(1px/var(--zoom,1))_color-mix(in_srgb,var(--brand)_55%,transparent)]',
               editing && 'cursor-text',
               !stream &&
                 remoteEditor &&
@@ -2385,7 +2456,7 @@ export const FrameView = memo(function FrameView({
                   selector={probe.selector}
                   geometry={{ rect: probe.rect, rotation: probe.rotation ?? 0, box: probe.box ?? probe.rect }}
                   onGeometry={(g: ElementGeometry) =>
-                    setProbe((p) => (p && p.selector === probe.selector ? { ...p, ...g } : p))
+                    setProbeState((p) => (p && p.selector === probe.selector ? { ...p, ...g } : p))
                   }
                   onResizing={(on) => {
                     if (on) clearHover()

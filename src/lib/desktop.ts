@@ -120,6 +120,11 @@ export function pruneTabs(liveIds: ReadonlySet<string>) {
   if (next.length !== tabs.length) setTabs(next)
 }
 
+/** a canvas renamed elsewhere (Home): its open tab, if any, follows; opens none */
+export function renameTab(id: string, name: string) {
+  if (useTabs.getState().tabs.some((t) => t.id === id)) ensureTab(id, name)
+}
+
 export function closeTab(id: string, currentPath: string) {
   const { tabs } = useTabs.getState()
   const at = tabs.findIndex((t) => t.id === id)
@@ -373,7 +378,7 @@ export function initDesktopShell() {
   listenForDesktopLinks()
   /* capture phase, so a field that stops its keys (the zoom input, a colour
      field) cannot swallow the tab and Settings shortcuts; a frame relays them from inside
-     too, text editing included (frameRuntime.ts) */
+     too, text editing included (src/frame-runtime/keyRelay.ts) */
   document.addEventListener(
     'keydown',
     (e) => {

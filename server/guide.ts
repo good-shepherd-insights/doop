@@ -283,8 +283,8 @@ needs a reusable piece the system lacks, add it, then use it.
   are captured as overrides on that element alone and survive every later change to the main. Do
   not detach to make a small change.
 - To change them all, call update_component with find + replace, and read the impact it reports.
-  Approved frames keep their sign-off: following a component is not an edit. Use dry_run first on anything
-  widely used. Never edit each instance by hand.
+  Approved frames keep their sign-off: following a component is not an edit. Never edit each
+  instance by hand.
 - After changing a component, use get_component_preview to check the appearance you edited. Omit props
   for the default, or pass e.g. {"tone": ["solid", "ghost"]} to compare two tones at the default size.
 - Keep data-doop-part, data-doop-prop, data-doop-if and data-doop-slot when editing a main: part
@@ -306,8 +306,8 @@ needs a reusable piece the system lacks, add it, then use it.
   canvases still to pull) and sync_component on each; without a component it pulls all that wait.
   Publish when the human asks, in any words ("make it available to the team"), not on your own
   initiative; it never changes another canvas until that canvas pulls. Only when the human asks
-  for the change on every canvas: update_library_everywhere on the library canvas (dry_run first;
-  it changes other people's canvases; approved frames keep their sign-off).`
+  for the change on every canvas: update_library_everywhere on the library canvas (ask the human
+  first: it changes other people's canvases; approved frames keep their sign-off).`
 
 export const DOOP_GUIDE = `# Doop Agent Guide
 
@@ -500,9 +500,10 @@ A canvas's palette, type scale, spacing, radii and fonts are typed design tokens
 properties every frame uses, each with a value per theme (light, dark, …) where it differs.
 
 - get_canvas lists them (and says when a canvas has none yet). Write var(--name) in CSS,
-  never the literal value, so one token change restyles every frame using it. Doop writes
-  the values a frame names into its own <style data-doop-tokens> block: keep that block and
-  never edit it, and never declare the palette on a frame's own :root.
+  never the literal value, so one token change restyles every frame using it. Doop supplies
+  the values a frame names wherever the frame is rendered (a <style data-doop-tokens> block
+  you may see in a screenshot's source or an expanded read): never write that block
+  yourself, and never declare the palette on a frame's own :root.
 - No tokens yet: create_tokens before the first frame, from the brief (palette by role,
   font families, type scale, spacing, radii). Decisions and their reasons go to
   save_decision; values never do.
@@ -818,6 +819,13 @@ file and the components it imports, then set_frame_html a complete self-containe
 document that faithfully renders it — real CSS derived from its actual classes and
 design tokens, realistic placeholder data, no scripts. Design at the frame's width and
 resize the frame to the content. Keep the marker meta so the frame stays traceable.
+
+A person without a Doop Agent plan who imports a repo queues the import for you: tool
+results then carry a REPO IMPORT notice. take_repo_cards hands you the cards (a design
+system, then screens) with the repository tree; read_repo_files reads source through
+Doop's GitHub connection, so you need no checkout; finish_repo_card lands each screen
+as a placed, marked frame, or pins the design system as the canvas guideline. Review
+every landed screen with get_frame_screenshot and fix it in place.
 
 ## Synced from a live app
 

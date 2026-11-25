@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
+import { frameHtmlReady } from '../lib/pages'
 import { api, errorMessage } from '../lib/api'
 import { beginFrameSave } from '../lib/frameSaves'
-import { copyFramePng, downloadFrameExport, downloadFrameHtml, downloadFramesPdf } from '../lib/frameExport'
+import {
+  copyFramePng,
+  downloadFrameExport,
+  downloadFrameHtml,
+  downloadFramesPdf,
+  useFrameExporting,
+} from '../lib/frameExport'
 import { setExportSettings, useExportSettings } from '../lib/exportSettings'
 import { fitExportScale, formatExportScale } from '../../shared/exportScale'
 import { ExportOptions, FRAME_FORMATS } from './ExportOptions'
@@ -15,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { CopyIcon, DownloadIcon, FrameIcon, LockIcon, RotationIcon } from './ui/icons'
 import { Button } from './ui/button'
+import { Spinner } from './ui/toast'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { NumberField, PropertyScrubContext, PropertySection, StaticField } from './ui/property-field'
@@ -66,12 +74,21 @@ export function Inspector({
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
+  /* a PDF can take a while, and the button is where the person is looking,
+     so it says so until the export lands */
+  const exporting = useFrameExporting(frame.id)
   const exportSettings = useExportSettings()
   /* what the frame actually renders at: a huge frame caps a large pick */
   const exportScale = fitExportScale(frame, exportSettings.scale)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  /* the frame's page is here and current: until then its HTML here is a blank
+     or stale copy, which is neither shown nor edited (a draft of it would be
+     saved over the real document once that arrives) */
+  const htmlReady = useStore((s) => frameHtmlReady(s, frame.id))
+  /* whether the draft was last synced from a ready copy */
+  const draftReady = useRef(htmlReady)
   const queuedSave = useRef<{ timer: number; finish: () => void } | null>(null)
   const copyTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
@@ -83,7 +100,9 @@ export function Inspector({
      updates unless the user is typing. The editor is always on screen, and
      rewriting it costs the browser ~25ms for a 300KB frame, so an agent
      streaming into the selected frame is pulled in at most every
-     HTML_PULL_MS, the last chunk always landing */
+     HTML_PULL_MS, the last chunk always landing. The page arriving always
+     resets it: focus in the field while it loaded was not typing, and a
+     draft of the blank copy must never be what the next keystroke saves */
   const lastPull = useRef(0)
   /* focus is state, not a check of document.activeElement, so leaving the
      editor re-runs the pull below: an update that arrived while it had focus
@@ -94,15 +113,17 @@ export function Inspector({
   useEffect(() => {
     const switched = frameId.current !== frame.id
     frameId.current = frame.id
+    const arrived = htmlReady && !draftReady.current
+    draftReady.current = htmlReady
     const pull = () => {
       lastPull.current = performance.now()
       setDraft(frame.html)
       setSaveState('idle')
     }
-    if (switched) {
+    if (switched || arrived) {
       pull()
       /* a copy confirmation belongs to the frame it was copied from */
-      setHtmlCopy('idle')
+      if (switched) setHtmlCopy('idle')
       return
     }
     if (editing || saveState === 'dirty' || frame.html === draft) return
@@ -110,7 +131,7 @@ export function Inspector({
     if (wait <= 0) return pull()
     const timer = window.setTimeout(pull, wait)
     return () => window.clearTimeout(timer)
-  }, [frame.id, frame.html, draft, editing, saveState])
+  }, [frame.id, frame.html, draft, editing, saveState, htmlReady])
 
   /* the confirmation timer must not fire after the panel is gone */
   useEffect(
@@ -124,6 +145,7 @@ export function Inspector({
      an older save finishing late never marks a newer edit as saved */
   const editSeq = useRef(0)
   function onHtmlChange(value: string) {
+    if (!frameHtmlReady(useStore.getState(), frame.id)) return
     const seq = ++editSeq.current
     setDraft(value)
     setSaveState('dirty')
@@ -258,9 +280,11 @@ export function Inspector({
           <FrameApprovalControl key={frame.id} frame={frame} hasUnsavedChanges={saveState === 'dirty'} />
         </InspectorGroup>
         <PropertyScrubContext.Provider value={boxScrub}>
+          {/* keyed by frame: a value typed for one frame is never committed to the next */}
           <InspectorGroup title={t('inspector.sectionPosition')}>
             <div className="grid grid-cols-2 gap-1.5">
               <NumberField
+                key={frame.id}
                 label={t('inspector.xPosition')}
                 prefix="X"
                 unit="px"
@@ -270,6 +294,7 @@ export function Inspector({
                 onCommit={(x) => editBox({ x })}
               />
               <NumberField
+                key={frame.id}
                 label={t('inspector.yPosition')}
                 prefix="Y"
                 unit="px"
@@ -283,6 +308,7 @@ export function Inspector({
           <InspectorGroup title={t('inspector.sectionLayout')}>
             <div className="grid grid-cols-2 gap-1.5">
               <NumberField
+                key={frame.id}
                 label={t('inspector.width')}
                 prefix="W"
                 unit="px"
@@ -292,6 +318,7 @@ export function Inspector({
                 onCommit={(width) => editBox({ width })}
               />
               <NumberField
+                key={frame.id}
                 label={t('inspector.height')}
                 prefix="H"
                 unit="px"
@@ -301,6 +328,7 @@ export function Inspector({
                 onCommit={(height) => editBox({ height })}
               />
               <NumberField
+                key={frame.id}
                 label={t('inspector.rotation')}
                 prefix={<RotationIcon size="rail" />}
                 unit="°"
@@ -321,15 +349,17 @@ export function Inspector({
             <Button
               variant="bare"
               className={cn(fillBtn, 'col-span-2 gap-1.5')}
-              title={t('inspector.exportImageTitle')}
+              title={exporting ? t('inspector.exportingTitle') : t('inspector.exportImageTitle')}
+              disabled={exporting}
+              aria-busy={exporting}
               onClick={() => {
                 trackExport(exportSettings.format, 1, 'inspector')
                 if (exportSettings.format === 'pdf') void downloadFramesPdf(frame.canvasId, [frame])
                 else void downloadFrameExport(frame, exportSettings.format, exportSettings.scale)
               }}
             >
-              <DownloadIcon className="size-3.5" />
-              {t('inspector.export')}
+              {exporting ? <Spinner className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
+              {exporting ? t('inspector.exporting') : t('inspector.export')}
             </Button>
             <Button
               variant="bare"
@@ -379,6 +409,7 @@ export function Inspector({
                 variant="bare"
                 className={cn(fillBtn, 'gap-1.5')}
                 title={t('inspector.copyHtmlTitle')}
+                disabled={!htmlReady}
                 onClick={copyHtml}
               >
                 <CopyIcon className="size-3.5" />
@@ -404,9 +435,10 @@ export function Inspector({
               aria-label={t('inspector.editHtml')}
               variant="code"
               className="h-[320px] flex-none max-md:h-auto max-md:min-h-[160px] max-md:flex-1"
-              value={draft}
+              value={htmlReady ? draft : ''}
+              readOnly={!htmlReady}
               spellCheck={false}
-              placeholder="<!doctype html>…"
+              placeholder={htmlReady ? '<!doctype html>…' : t('stage.pageLoading')}
               onChange={(e) => onHtmlChange(e.target.value)}
               onFocus={() => setEditing(true)}
               onBlur={() => setEditing(false)}

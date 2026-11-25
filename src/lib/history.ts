@@ -1,12 +1,14 @@
 import { stackOf, type StackWrite } from '../../shared/frameStack'
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
 import { pageBackground } from '../../shared/pageBackground'
-import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
+import type { ClientCanvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
 import { requestFrame, settleFrames } from './frameBridge'
 import { clearElementId, elementIdAt, elementName, setElementName } from './layers'
 import { elementIdSelector } from '../../shared/elementId'
 import { useStore } from './store'
+import { frameHtmlReady } from './pages'
+import { loadFramePages } from './ws'
 import { savedByOthersSince } from './theirSaves'
 import { posthog } from './posthog'
 
@@ -265,7 +267,7 @@ export function recordPages(
 
 /** The guides on `canvas` that a page list of `next` would remove with
  *  their pages. */
-export function guidesLeaving(canvas: Canvas, next: CanvasPageInfo[]): CanvasGuide[] {
+export function guidesLeaving(canvas: ClientCanvas, next: CanvasPageInfo[]): CanvasGuide[] {
   return (canvas.guides ?? []).filter((g) => !next.some((page) => page.id === g.pageId)).map((g) => ({ ...g }))
 }
 
@@ -589,8 +591,20 @@ export function deleteFrameTracked(frame: Frame) {
   deleteFramesTracked([frame])
 }
 
-/** Delete several frames as one undo step. */
+/** Delete several frames as one undo step. A frame whose page is still on its
+ *  way holds a blank or stale copy here, which undo would bring back: the page
+ *  is read first, and the frames as they are then are deleted. */
 export function deleteFramesTracked(frames: Frame[]) {
+  if (!frames.every((frame) => frameHtmlReady(useStore.getState(), frame.id))) {
+    const ids = new Set(frames.map((frame) => frame.id))
+    loadFramePages([...ids])
+      .then(() => {
+        const current = (useStore.getState().canvas?.frames ?? []).filter((frame) => ids.has(frame.id))
+        if (current.length) deleteFramesTracked(current)
+      })
+      .catch(console.error)
+    return
+  }
   const entries: Entry[] = frames.map((f) => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) }))
   const [first, ...rest] = entries
   if (!first) return
@@ -614,7 +628,7 @@ function remapId(oldId: string, newId: string) {
 async function recreate(e: { frameId: string; snapshot: Snapshot; version?: number }) {
   const { canvasId, ...rest } = e.snapshot
   const canvas = useStore.getState().canvas
-  if (!canvas || canvas.id !== canvasId) throw new Error('Canvas changed')
+  if (!canvas || canvas.id !== canvasId) throw new Error('ClientCanvas changed')
   const pages = canvasPages(canvas)
   if (!rest.pageId || !pages.some((p) => p.id === rest.pageId)) rest.pageId = pages[0]!.id
   const f = await api.createFrame(canvasId, rest)
@@ -668,13 +682,15 @@ function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
    stack it came from for another try, `applied` (what did land before the
    failure) on the opposite stack so it stays reversible. */
 class PrerequisiteFailed extends Error {
-  constructor(
-    readonly remaining: Entry,
-    readonly applied: Entry | null,
-    cause: unknown,
-    readonly canvasId?: string,
-  ) {
+  readonly remaining: Entry
+  readonly applied: Entry | null
+  readonly canvasId?: string
+
+  constructor(remaining: Entry, applied: Entry | null, cause: unknown, canvasId?: string) {
     super(cause instanceof Error ? cause.message : 'Could not apply the page change', { cause })
+    this.remaining = remaining
+    this.applied = applied
+    this.canvasId = canvasId
   }
 }
 
@@ -767,7 +783,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
   if (e.type === 'pages') {
     const state = useStore.getState()
     const canvas = state.canvas
-    if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+    if (!canvas || canvas.id !== e.canvasId) throw new Error('ClientCanvas changed')
     const expected = canvasPages(canvas)
     const next = applyPageChanges(expected, forward ? e.before : e.after, forward ? e.after : e.before)
     const leaving = guidesLeaving(canvas, next)
@@ -778,7 +794,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
     const departing = expected.filter((page) => !next.some((p) => p.id === page.id)).map((page) => page.id)
     if (departing.length) e.guides = rememberGuides(e.guides, departing, leaving)
     const current = useStore.getState()
-    if (current.canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    if (current.canvas?.id !== e.canvasId) throw new Error('ClientCanvas changed')
     if (samePages(canvasPages(current.canvas), expected) || samePages(canvasPages(current.canvas), saved)) {
       current.setPages(saved, canvas.id)
       const active = forward ? e.activeAfter : e.activeBefore
@@ -794,9 +810,11 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
   } else if (e.type === 'page-background') {
     await applyPageBackground(e, forward ? e.after : e.before)
   } else if (e.type === 'stack') {
-    if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('ClientCanvas changed')
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'layer-name') {
+    /* the name is written into the frame's HTML: its page is read first if this browser has not */
+    await loadFramePages([e.frameId])
     await saveLayerName(
       e.frameId,
       e.elementId ? elementIdSelector(e.elementId) : e.selector,
@@ -804,6 +822,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
     )
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
+    /* an HTML step on a frame whose page this browser has not read: read it
+       first, so the save is not refused and the page shows the result */
+    if ('html' in patch) await loadFramePages([e.frameId])
     /* a frame that was straight has no rotation to go back to: JSON drops
        an undefined field, so the server is told 0 to clear the turn */
     if ('rotation' in patch && patch.rotation === undefined) patch.rotation = 0
@@ -858,7 +879,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo', guarded = false): Pro
    nowhere to go back to. */
 async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGuide | null) {
   const canvas = useStore.getState().canvas
-  if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+  if (!canvas || canvas.id !== e.canvasId) throw new Error('ClientCanvas changed')
   const id = (e.after ?? e.before)!.id
   if (target && !canvasPages(canvas).some((page) => page.id === target.pageId)) throw new Error('Page removed')
   const current = canvas.guides?.find((guide) => guide.id === id) ?? null
@@ -878,7 +899,7 @@ async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGu
    with the server either way. A page that is gone has nothing to paint. */
 async function applyPageBackground(e: Extract<Entry, { type: 'page-background' }>, target: string | null) {
   const canvas = useStore.getState().canvas
-  if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+  if (!canvas || canvas.id !== e.canvasId) throw new Error('ClientCanvas changed')
   if (!canvasPages(canvas).some((page) => page.id === e.pageId)) throw new Error('Page removed')
   const current = pageBackground(canvasPages(canvas).find((page) => page.id === e.pageId))
   useStore.getState().setPageBackgroundLocal(e.pageId, target)

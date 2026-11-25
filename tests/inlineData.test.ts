@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CustomFont } from '../shared/fonts'
 
 vi.mock('../server/db/persist.ts', () => ({
+  refreshAssetRefs: () => {},
   saveFrame: () => {},
   saveFrameNow: async () => {},
   saveCanvas: () => {},
@@ -290,7 +291,9 @@ describe('over MCP', () => {
     expect(set.isError).toBe(true)
     const edit = await call('edit_frame_html', { frame_id: frameId, old_str: '<h1>Hi</h1>', new_str: OPEN_CARD })
     expect(edit.isError).toBe(true)
-    expect(edit.text).toContain('<doop-use component="Card"> is opened and never closed')
+    /* refused before it runs: the replacement opens a tag it does not close (#684) */
+    expect(edit.text).toContain('new_str opens 1 more <doop-use>')
+    expect(edit.text).not.toContain('<doop-use component="Card"> is opened and never closed')
     expect(store.getFrame(frameId)!.html).toBe(before)
 
     /* closed or self-closing, the same edit goes through */
@@ -319,7 +322,7 @@ describe('over MCP', () => {
       new_str: '<p>Inner</p></template>',
     })
     expect(dropped.isError).toBe(true)
-    expect(dropped.text).toContain('never closed')
+    expect(dropped.text).toContain('more <doop-use> than it closes')
     expect(store.getFrame(frameId)!.html).toBe(before)
 
     const copy = await call('edit_frame_html', {
@@ -353,7 +356,7 @@ describe('over MCP', () => {
       expect(last.text).toContain('<doop-use component="Card"> is opened')
       expect(store.getFrame(frameId)!.html).toBe(streamed)
       /* the refusal counts as the agent at work: the idle sweep 15s on leaves the stream open */
-      actions.expireIdleStreams(Date.now() + 15_000)
+      await (await import('../server/canvasWrites.ts')).settleIdleStreams(Date.now() + 15_000)
       expect(actions.isFrameMidStream(frameId)).toBe(true)
 
       const again = await call('append_frame_html', {
@@ -714,7 +717,7 @@ describe('the resident agent', () => {
 
   it('is refused on create, set, edit and rewrite chunks', async () => {
     const canvasId = store.createCanvas('resident', 'owner').id
-    const state = run()
+    const state = newRunState()
     const created = await execTool(
       call('create_frame', { name: 'Hero', width: 400, height: 300, html: doc(faceCss) }),
       canvasId,

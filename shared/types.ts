@@ -1,7 +1,7 @@
 import type { AgentBrand } from './agentBrand.ts'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
-import type { ComponentDef } from './components.ts'
+import type { ComponentDef, WireComponentDef } from './components.ts'
 import type { AgentRole } from './agents.ts'
 import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
@@ -39,6 +39,11 @@ export interface Frame {
   /** Human sign-off for implementation. Missing/null means draft. Design
    * edits retain the attribution but change the status to needs_review. */
   approval?: FrameApproval | null
+  /** When the server last rendered this frame again without a write of it: a component it
+   *  uses changed its markup, which the frame stores only a reference to, so `html` moved
+   *  and `updatedAt` did not. Of two copies with the same `updatedAt`, the one with the
+   *  greater `rendered` is the newer rendering. In memory and on the wire only. */
+  rendered?: number
 }
 
 export interface FrameApproval {
@@ -228,6 +233,16 @@ export function isLibraryPublishPolicy(value: unknown): value is LibraryPublishP
   return LIBRARY_PUBLISH_POLICIES.includes(value as LibraryPublishPolicy)
 }
 
+/** Whether a workspace's canvases may be shared beyond the team: a share link
+ *  for anyone ("Anyone with the link can…") and a Community gallery listing.
+ *  'off' keeps every canvas in it to the owner, invited people and members. */
+export const LINK_SHARING_POLICIES = ['allowed', 'off'] as const
+export type LinkSharingPolicy = (typeof LINK_SHARING_POLICIES)[number]
+
+export function isLinkSharingPolicy(value: unknown): value is LinkSharingPolicy {
+  return LINK_SHARING_POLICIES.includes(value as LinkSharingPolicy)
+}
+
 /** A workspace as the dashboard lists it — for one viewer, hence `role`. */
 export interface WorkspaceSummary {
   id: string
@@ -252,6 +267,8 @@ export interface WorkspaceSummary {
   cancelAtPeriodEnd: boolean
   /** who may publish to its component library */
   libraryPublish: LibraryPublishPolicy
+  /** may its canvases be shared by link or listed in the Community gallery */
+  linkSharing: LinkSharingPolicy
   createdAt: number
   updatedAt: number
 }
@@ -457,11 +474,14 @@ export interface AgentTask {
   /** board cards: the connection and model the composer picked for this
    *  card; absent runs on the requester's Settings default */
   runner?: RunnerPick
+  /** a job with countable steps (an import): how far along it is. Live only
+   *  — not persisted; a task whose server died mid-job is closed on expiry */
+  progress?: { done: number; total: number }
 }
 
 export interface CardScope {
   frameId: string
-  /** element selector inside the frame (frameRuntime cssPath); absent = whole frame */
+  /** element selector inside the frame (cssPath in src/frame-runtime/geometry.ts); absent = whole frame */
   selector?: string
 }
 
@@ -486,7 +506,17 @@ export interface RepoCardPayload {
   importId: string
   /** the screen to sketch — absent on a design-system card */
   screen?: RepoScreenRef
+  /** queued for the requester's own MCP agent (Claude Code, Codex…) because
+   *  they have no Doop Agent plan: the resident never claims it, an MCP agent
+   *  takes it with take_repo_cards */
+  outside?: true
 }
+
+/** Who carries out a repo import's cards: the Doop Agent on a model account,
+ *  the Claude Plan on the person's desktop, or their own MCP agent (`client`
+ *  is its OAuth application's name, for opening it with a prompt). */
+export type GithubImportRunner =
+  { kind: 'doop' } | { kind: 'plan'; online: boolean } | { kind: 'agent'; client?: string }
 
 /** Human feedback left on an agent task: an open request on the canvas that ANY
  *  agent can pick up — delivered inside the next identified agent tool result. */
@@ -595,8 +625,51 @@ export interface PeerViewport {
 
 /* ---- websocket protocol ---- */
 
+/** A frame as the room sends it: without `html` when the receiver has not
+ *  loaded the frame's page. Its metadata (page, box, name, version) is current
+ *  either way; the page's HTML comes with `page:load`. */
+export type WireFrame = Omit<Frame, 'html'> & { html?: string }
+
+/** A canvas as `init` sends it: every frame's metadata, HTML only for the
+ *  frames on the pages in `loadedPageIds`, and its components without their
+ *  earlier revisions. */
+export type WireCanvas = Omit<Canvas, 'frames' | 'components'> & {
+  frames: WireFrame[]
+  components?: WireComponentDef[]
+}
+
+/** A canvas as a REST response hands it to a browser: whole frames, components
+ *  without their earlier revisions. */
+export type ClientCanvas = Omit<Canvas, 'components'> & { components?: WireComponentDef[] }
+
 export type ClientMessage =
-  | { type: 'join'; canvasId: string; clientId: string; name: string; kind: ActorKind }
+  /** `pagesOnDemand`: the browser reads pages as it opens them (`page:load`),
+   *  so the server sends the HTML of the page the canvas opens on alone: the
+   *  page of `frameId` (a frame the URL links), else `pageId` (the page the
+   *  browser shows on a rejoin, or the URL names), else the default
+   *  (shared/pages.ts openingPageId). A join without it (the native apps, a tab
+   *  on an older bundle) is sent the whole canvas, as before. */
+  | {
+      type: 'join'
+      canvasId: string
+      clientId: string
+      name: string
+      kind: ActorKind
+      pagesOnDemand?: boolean
+      /** the browser composes each frame's document itself from the canvas's tokens
+       *  and components (shared/frameCompose.ts), so it is sent frames' source. A join
+       *  without it is sent every frame composed, and sent it again when the tokens or
+       *  a component's stylesheet change */
+      composesFrames?: boolean
+      pageId?: string
+      frameId?: string
+    }
+  /** the browser opens a page whose frames' HTML it does not hold (or holds stale) */
+  | { type: 'page:load'; pageId: string }
+  /** the pages the browser shows (the editor's page, a prototype's screens):
+   *  their HTML stays in memory while it does. A page read with `page:load`
+   *  and not shown (an export, an undo) is left to go idle */
+  | { type: 'pages:shown'; pageIds: string[] }
   | { type: 'cursor'; x: number; y: number }
   | { type: 'viewport'; viewport: PeerViewport }
   | { type: 'editing'; frameId: string | null }
@@ -605,7 +678,10 @@ export type ClientMessage =
 export type ServerMessage =
   | {
       type: 'init'
-      canvas: Canvas
+      canvas: WireCanvas
+      /** the pages whose frames carry their HTML in `canvas`: the page it opens
+       *  on. A server from before page loading leaves it out: every page, then */
+      loadedPageIds?: string[]
       presences: Presence[]
       activity: ActivityItem[]
       tasks: AgentTask[]
@@ -638,16 +714,29 @@ export type ServerMessage =
       height: number
       rotation?: number
     }
-  | { type: 'frame:created'; frame: Frame; actor: Actor }
-  | { type: 'frame:updated'; frame: Frame; actor: Actor }
+  /** a page's frames, HTML included, answering `page:load`; from now on the
+   *  room sends this page's frames to this browser with their HTML */
+  | { type: 'page:frames'; pageId: string; frames: Frame[] }
+  /** the page could not be read (its storage is away for now): ask again later */
+  | { type: 'page:failed'; pageId: string }
+  /** the server let the page's frame HTML go: this browser's copy is no longer
+   *  kept current, so it reads the page again (`page:load`) before it shows it */
+  | { type: 'page:dropped'; pageId: string }
+  | { type: 'frame:created'; frame: WireFrame; actor: Actor }
+  /** `rerender`: the frame was not written. A component it uses changed its markup and the
+   *  server rendered it again (`frame.rendered` moved, `updatedAt` did not) */
+  | { type: 'frame:updated'; frame: WireFrame; actor: Actor; rerender?: true }
   | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
+  /** the workspace's admins switched link sharing off: the canvas is private
+   *  and out of the Community gallery (an owner's Share modal follows) */
+  | { type: 'canvas:sharing-closed' }
   | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }
   /** a ruler guide was added or moved (guide set) or removed (null) */
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
   /** a component changed, or was deleted (`component` null) */
-  | { type: 'component'; id: string; component: ComponentDef | null; actor: Actor }
+  | { type: 'component'; id: string; component: WireComponentDef | null; actor: Actor }
   /** a workspace library this canvas can use published or withdrew components:
    *  what the Components panel offers, and which updates wait, should be read again */
   | { type: 'library'; actor: Actor }
