@@ -78,6 +78,7 @@ tasks. **Connect AI** in the top bar walks you through each one.
 | Cursor                                       | **Add to Cursor** in Connect AI                                                 |
 | OpenCode, VS Code Copilot, OpenClaw and more | Any MCP client, over OAuth or with an agent key ([setup](#connect-an-ai-agent)) |
 | Headless agents (n8n, Mastra, CI)            | An agent key as a bearer header ([setup](#headless-agents-agent-keys))          |
+| Any agent with a shell (the `doop` CLI)      | An agent key; frames as local files ([setup](#from-a-shell-the-doop-cli))       |
 
 No agent of your own? The built-in [Doop Agent](#the-doop-agent) runs on the model account you
 connect: a ChatGPT subscription, or an OpenAI, Claude, Gemini, DeepSeek, Kimi or OpenRouter key.
@@ -657,6 +658,17 @@ ID token includes the `email` and `verified_primary_email` optional claims; with
 Microsoft sign-in still works but only links to an existing account that is already
 verified. Everything else (allowlist, admin promotion) follows the SSO rules above.
 
+### Sign in with GitHub
+
+Same shape as Google. Register an OAuth app under
+[GitHub developer settings](https://github.com/settings/developers) with
+`<BETTER_AUTH_URL>/api/auth/callback/github` as the authorization callback URL, generate a
+client secret, and set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` together. It is a
+separate app from the `GITHUB_APP_*` GitHub App that imports repositories. Doop takes the
+account's primary GitHub address (the `user:email` scope), not the one shown on the public
+profile, and links to an existing account when GitHub has verified that address. Everything
+else (allowlist, admin promotion) follows the SSO rules above.
+
 ### Sign in with Apple
 
 Two independent halves, documented in [.env.example](.env.example). For the web button,
@@ -823,6 +835,30 @@ auto-detected). Humans can hit the same renderer at `GET /api/frames/:id/screens
 For website viewing/imports, setting `CONTEXT_DEV_API_KEY` makes Context.dev acquire the rendered
 HTML while Doop still sanitizes it and renders the preview locally; without the key, Doop navigates
 to the public page directly in Chromium.
+
+### From a shell: the doop CLI
+
+An agent that has a shell (Claude Code, Codex, Cursor) or a CI job can work on a canvas without MCP,
+through the `doop` CLI: frames and components are local files it edits with its own tools, and
+screenshots and exports are written to disk. It is one dependency-free file, on npm as
+`@doop-design/cli`. It signs in through the browser, or with an agent key in CI.
+
+```bash
+npm install -g @doop-design/cli        # or bun add -g, pnpm add -g; npx @doop-design/cli runs it uninstalled
+export DOOP_SERVER=http://localhost:4300
+doop login                             # approve in the browser; in CI set DOOP_API_KEY to an agent key
+
+doop link --create "Onboarding v2"     # or an existing canvas: its id, name or URL
+doop pull                              # frames -> designs/*.html
+doop push                              # changed files -> the canvas, live
+doop screenshot designs/hero.html      # prints the path of a PNG
+doop wait                              # blocks until a person leaves feedback
+```
+
+A server also serves the CLI it was built with at `/cli/doop.mjs`, for when no registry is reachable.
+
+`doop init` tells the coding agents in a repository about it. Commands, conflicts, components, CI
+use and the HTTP endpoints underneath are in [docs/cli.md](docs/cli.md).
 
 ### Design sync: push an app's live screens onto a canvas
 

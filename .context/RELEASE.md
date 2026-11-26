@@ -161,6 +161,36 @@ the VSIX as an artifact. The publisher (`doop` on marketplace.visualstudio.com/m
 `shared/editorConnect.ts`, which the server checks sign-in links against. The server routes it needs (`/editor/*`)
 ship with the web app, so deploy the server before tagging.
 
+## doop CLI (npm)
+
+The doop CLI is the npm package `@doop-design/cli` (`bin`: `doop`), published by
+`.github/workflows/publish-cli.yml`. `bun run pack:cli` (`scripts/pack-doop-cli.mjs`) writes the package to
+`cli/dist`: the bundle Doop serves at `/cli/doop.mjs` (one build, `scripts/doop-cli-bundle.mjs`), its manifest
+`cli/package.json`, `cli/README.md` and the `LICENSE` where the repository has one.
+
+The CLI has its own version, in `cli/package.json`, as the desktop app and the editor extension have theirs: it
+is released when the CLI changes, not when the app's version does. `doop --version` prints it, from the npm
+package and from the file a server serves alike.
+
+To release: bump `version` in `cli/package.json`, merge, deploy the server if the CLI needs something new from
+it, then push the tag `cli-v<version>`. The workflow checks the tag matches, packs, runs the packed CLI and
+publishes. A manual run packs and uploads the package as an artifact without publishing. npm refuses a version
+that is already published.
+
+Publishing uses npm trusted publishing: the package's settings on npmjs.com name this repository and
+`publish-cli.yml` as its trusted publisher, and no npm token is stored as a secret. npm's conditions
+(docs.npmjs.com/trusted-publishers): a GitHub-hosted runner, which is why this job does not run on the self-hosted
+ones; npm 11.5.1 or newer, which the workflow installs; and a `repository.url` in the manifest that is the
+repository of the publishing workflow (`repository.url` in `cli/package.json`: moving the workflow to another
+repository means changing it too). Published from a private repository, the package carries no provenance.
+
+Done by hand, once: the `doop-design` organisation on npmjs.com; the first publish, since a trusted publisher is
+set on a package that exists (`bun run pack:cli`, then `npm publish ./cli/dist --access public` signed in as an
+owner of the organisation); and then, under the package's Settings → Trusted publishing, GitHub Actions with the
+organisation `doop-design`, this repository and the workflow file `publish-cli.yml`, allowing `npm publish` (a
+new configuration allows only `npm stage publish`, which waits for a maintainer's approval). A new configuration
+expires unless its first publish succeeds within two days, so set it up just before the first tagged release.
+
 ## Codex desktop setup
 
 Connect AI → Codex can register Doop directly in the shared Codex config through

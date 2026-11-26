@@ -27,6 +27,11 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   so nothing else is re-serialized; `actions.ensureElementId`, exposed as
   `POST /api/frames/:id/element-id` to the comment role) as an annotation: `store.updateFrame`'s
   `annotation` option keeps `ready_for_dev` sign-off, and no version or activity line is written.
+  Nor is it an edit: `updatedBy` stays the design's last author and `updatedAt` moves one step past
+  the version before, not to now (`store.updateFrame`), so a save made against the older version is
+  still a conflict, while agents reading `updatedBy`/`updatedAt` for who is mid-edit are not told a
+  commenter just edited the frame. Every annotation writer (stamps, token and theme renames,
+  component markup written out again) files it so.
   A positional path that does not resolve in the saved HTML (a script-made element, a frame
   mid-stream) is refused, and a comment falls back to the frame at its point. The frame runtime's
   probe reports an existing id as `elementId`; its positional `cssPath` is now only the editor's
@@ -150,6 +155,96 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   memory (one process). Built by `scripts/build-vscode-extension.mjs` (`--vsix` packs it), published on a `vscode-v*`
   tag by `.github/workflows/vscode-extension.yml`. Tests: `editorConnect.test.ts`, `editorConnectHttp.test.ts`,
   `vscodeToml.test.ts`.
+- Agent API (`server/agentApi.ts`, mounted at `/api/v1` ahead of the session gate): frames as files over
+  HTTP for a process holding an agent key, which is the only credential it takes (a browser session gets 401).
+  `GET /frames/:id/html` answers the frame as agents edit it (`?form=rendered`: composed, as it renders),
+  `PUT /frames/:id/html` replaces it from the raw body and `POST /canvases/:id/frames?name=&width=&height=&page=`
+  creates one. Writes go through `runCanvasWrite` with the MCP surface's inline-data rule, one operation
+  per request (`withArgsCanvases`), under the roles the MCP tools use, and a read waits for queued component changes as `get_frame` does. A frame's `updatedAt` is its version:
+  the `ETag`, and `If-Match` becomes the write's `ifUpdatedAt`, checked in the same step as the write.
+  An answer to a write is sent after its operation has committed. A write answers the frame, `html_changed` (the canvas stored the markup differently), `warnings` (what
+  could not be done with components), `notes` (reuse advice) and the human `feedback` it claimed. Errors are
+  `{ error: { code, message } }`: 401 `unauthorized`, 403 `forbidden`, 404 `not_found`, 409 `conflict` (with the
+  frame as it is now), 422 `refused` (inline data), 400 `invalid` (a body that is not HTML, a bad `If-Match`),
+  413 `too_large`. The agent is its account plus the `Doop-Agent` header, the identity an MCP agent of that
+  name has. Tested in `tests/agentApi.test.ts`.
+- Doop CLI (`cli/doop.ts`, `cli/doop/`, built to `public/cli/doop.mjs` by `bun run build:cli` and served at
+  `/cli/doop.mjs`; the same bundle is the npm package `@doop-design/cli`, packed into `cli/dist` by
+  `bun run pack:cli` with its own version in `cli/package.json`, released as in
+  [RELEASE.md](RELEASE.md#doop-cli-npm)): Doop from a shell, for coding agents and scripts. Frame HTML goes over the agent API;
+  everything else is plain `tools/call` requests to `/mcp` (no session, no SDK), so it has the MCP tools'
+  permissions, transactions and human feedback. One dependency-free file, with an agent key for both.
+  - Browser sign-in (`shared/cliConnect.ts`, `server/cliConnect.ts`, `src/pages/CliConnect.tsx`,
+    `cli/doop/login.ts`): `doop login` with no key listens on a loopback port and opens `/cli/connect` with a
+    random `state`, the port, the machine's name and the hash of a secret verifier. The page, signed in, asks
+    the person to confirm; `POST /api/cli/connect` answers a two-minute, single-use code as the loopback
+    address to go to (`http://127.0.0.1:<port>/callback`, nothing else) or, with `--no-browser`, as the code
+    itself to paste. `POST /cli/exchange` trades the code and the verifier for an agent key named `doop CLI on
+<machine>`, minted then (`answerWithKey` in `server/editorConnect.ts`, shared with the editor flow); a wrong
+    verifier spends the code. The flow is the editor extension's with a
+    verifier in place of a deep-link allow-list. The CLI trades the code before it
+    answers the browser, so the tab says it worked only when it did. With `CI` set it refuses at once, and where
+    it gets no loopback port it falls back to pasting. Signing in again replaces a minted key and deletes the
+    old one; `doop logout` deletes a key a
+    browser sign-in minted (`POST /cli/sign-out`, where a key can only delete itself) and only forgets one the
+    person brought. `BROWSER=none` keeps the CLI from opening a browser. Tests:
+    `cliConnect.test.ts`, `cliConnectHttp.test.ts`, and the whole flow in `doopCli.test.ts`.
+  - Sign-in: `doop login --key`, kept per server in `~/.config/doop/credentials.json` (0600), or `DOOP_API_KEY`.
+    A saved key goes to the server it was saved for. A key from the environment or `--key` goes only to a
+    server its holder named (`--server`, `DOOP_SERVER`, else doop.design), never to one that only a
+    `.doop/config.json` or a `doop link` URL names (exit 4): a cloned repository must not collect it.
+    A linked directory uses its config's server, whichever one was signed in to last, and `doop login` signs in
+    to a server its holder named (never the linked one unasked) and checks the key it was given. `agent_name` is
+    `--agent`, `DOOP_AGENT_NAME`, else the harness it runs under (Claude, Cursor, Gemini, Codex), else "Doop CLI".
+  - `doop link <id, name or URL>` writes `.doop/config.json` (canvas, server, the directory frames are
+    pulled to; meant to be committed; a `dir` or a tracked path that leaves the project is refused) and `.doop/.gitignore` for `state.json`,
+    `shots/` and `expanded/`.
+  - Frames are files: `pull` writes a frame's HTML to `<dir>/<slug>.html`, `push` sends a changed file and
+    creates a frame from an untracked one. `.doop/state.json` holds, per file, the frame id, the sha256 of
+    the HTML both sides last agreed on and the frame's version. A push carries that version, so the server
+    refuses a stale file as it writes (exit 3) unless `--force`; a frame that moved on without its HTML
+    changing (renamed, approved) is retried at its new version, and an element id stamped for a comment
+    counts as a change, so an older file cannot strip it. A pull over a file that changed locally too is the
+    same conflict. A tracked frame deleted on the canvas is reported as gone and its file kept. After a push
+    the file is rewritten when the canvas stored the markup differently, and `warnings` print first.
+  - Components are files too, in `<dir>/components/`: `<slug>.html` (the template), `.css` (its rules) and
+    `.json` (name, description, props), from `get_component`. A push sends only the parts that changed
+    through `update_component` with the pulled revision as `expected_rev`, so the server refuses a stale one
+    in the same write (exit 3). A name or description change does not move the revision, so a push that
+    changes the `.json` also sends the name and description it pulled (`expected_name`, `expected_description`)
+    and the server refuses the write in the same way when either has moved since. New files go through
+    `create_component`. Components are pulled and pushed before frames. A pull over a component whose `.html`
+    is missing keeps an edit to its `.css` or `.json`: it puts the template back when the canvas has not
+    changed since, and is otherwise a conflict until `--force`, whose hint says to restore the `.html` before
+    pushing. A component's main
+    frame is not pulled as a frame, and a component that follows a
+    workspace library is listed but not pulled. `screenshot` on a component file is `get_component_preview`.
+  - `doop expand` (and `pull --expand`) writes a frame as it renders (`get_frame` with `expand_components`)
+    to `.doop/expanded/`, marked as generated; `push` refuses any path under `.doop/`.
+  - `screenshot`, `export` and `call` write images and PDFs to disk and print the path (`.doop/shots/` for
+    screenshots); `inspect` prints `problems` only, the full report under `--json`.
+  - `doop wait` polls `get_comments` and then `get_feedback` (which claims the requests, so nothing may fail
+    after it) every 5s and exits when a person leaves something, or with exit 6 after `--timeout` (30m unless
+    set, 0 for none). New comments are those after the mark in `.doop/comments-seen.json`, the newest one a
+    wait has seen on that canvas, so one left between two waits is reported by the second, and a directory
+    linked to another canvas starts again. The mark has its own file so that a wait, which runs for minutes
+    beside `push`, never writes `state.json` and cannot undo what a push tracked; `.doop` files are written
+    through a temporary file and renamed.
+  - `tokens pull` writes `get_tokens` in any of its formats; `tokens push` sends only what differs from the
+    canvas (`create_tokens`, then `set_tokens`), deleting only with `--prune`. `asset upload` fills the
+    one-time upload ticket for a local file.
+  - `pull` and `push` refuse `--canvas` for another canvas than the linked one, and what the server said
+    beside an earlier step (warnings, claimed feedback) is printed even when a later step fails.
+  - `doop call <tool> key=text… key:=json… key@=file…` runs any MCP tool with `canvas_id` and `agent_name` filled in, `doop tools`
+    lists them, and `doop guide` prints the CLI's own primer (`cli/doop/primer.ts`) ahead of the agent guide.
+    `doop init` writes a marked block into `AGENTS.md` and, in a repository set up for Claude or with
+    `--skill`, `.claude/skills/doop/SKILL.md`.
+  - Ids are nanoid's ten characters, so one in 64 starts with a dash: `parseCommandLine` (`cli/doop/args.ts`)
+    reads an id-shaped word that is no option's spelling as an argument, or as the value of the option before it,
+    where `parseArgs` alone refused it as an unknown option. Tests: `doopCliArgs.test.ts`.
+  - Output is text, or one JSON document (`ok`, `data`, `notes`, `feedback`) with `--json`. Exit codes: 1
+    failed, 2 usage, 3 conflict, 4 not signed in, 5 not found, 6 wait timed out. Tested in
+    `tests/doopCli.test.ts` against a real server.
 - Agent identity (`shared/agentIdentity.ts`): an outside agent is its account and its `agent_name`,
   not the name alone, so two people's "Claude" on a shared canvas are two agents with their own
   presence and tasks. `mcpAgentKey` hashes the two into the opaque `agentKey` on the `Actor`, the
@@ -959,7 +1054,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   shows "Page" then; its Background `ColorField` edits the active page, one undo step
   (`page-background` history entry).
   `src/lib/paper.ts` resolves the paper a page shows (its colour, else the theme) and its tone;
-  `Stage` paints it with contrast dots and a standalone drawing takes its ink from that tone.
+  `Stage` paints it and a standalone drawing takes its ink from that tone.
   Tests: `pageBackground.test.ts`, the background cases in `storePages.test.ts`, `pages.test.ts`
   and `guideEdits.test.ts`.
 - Selection keys (`src/lib/selectionKeys.ts`, chords in `src/lib/keys.ts`), as Figma binds them: ↩
@@ -1359,7 +1454,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   handled (`actions.recordWorkReply`, `reply` on `tasks` and `feedback`, migration 0056; a later
   pipeline stage replaces an earlier one's), so the answer survives a reload. The line between
   Recent tasks and the chat drags, ↑/↓ on focus, double-click resets (`src/lib/agentsSplit.ts`,
-  per browser under `doop:agents-split`). Tests: `agentChat.test.ts`.
+  per browser under `doop:agents-split`). Recent tasks scrolls itself, its Show all / Show less
+  toggle pinned to its bottom edge in every state, and collapsing scrolls it back to the top.
+  Tests: `agentChat.test.ts`, `recentTasksBrowser.test.ts`.
 - Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may
   comment drags a thread's root pin; a ghost rides the pointer in the world layer
   (`CanvasComments`), above every frame, since the pin itself sits inside a clipped frame surface.
@@ -1495,7 +1592,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `shared/prototype.ts`, whose parser the frame runtime bundles too (`src/frame-runtime/proto.ts`). `PrototypePlayer.tsx`
   (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions, under the
   desktop tab strip (`--app-inset`), its controls in a bar above the screens (never over the design), scaled by the viewer's pick (actual size, responsive, fit width,
-  fit, fill; `screenLayout`, remembered under `doop:proto-scaling`); the
+  fit, fill; `screenLayout`, remembered under `doop:proto-scaling`; Fit, the default, only ever
+  shrinks, as Figma's "Fit width and height" does, so a phone screen on a big monitor stays at its
+  design size, while Fit width and Fill still enlarge); the
   Prototype tab and `PrototypeOverlay.tsx` edit and draw them (every link while no frame is
   selected; with one selected, or an element picked in it, only the links into and out of it, as
   Figma does); MCP has `get_prototype` and
@@ -1504,7 +1603,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 ## 5. Security and Secrets
 
 - better-auth 1.6.26 - authentication: email/password, generic OIDC/SSO, and Google / Microsoft /
-  Apple sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` / `APPLE_*` client pairs; the iOS app
+  GitHub / Apple sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` / `GITHUB_*` / `APPLE_*` client pairs; the iOS app
   signs in with Apple natively against `APPLE_APP_BUNDLE_IDENTIFIER`). Configuration and secrets
   (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, provider client IDs/secrets) come from the
   environment (`.env`, documented in `.env.example`); never committed.
@@ -1549,6 +1648,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   refused until an admin has signed in through SSO, so a provider nobody has proven cannot lock the
   instance out. Env keeps secrets and provider wiring only. Tests: `instanceSettings.test.ts`, the
   policy cases in `authFormBrowser.test.ts`.
+
+- GitHub sign-in (`loadGithubConfig`, `fetchGithubIdentity` in `server/auth.ts`): on when
+  `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are both set (an OAuth app, not the `GITHUB_APP_*`
+  importer), reported as `github` by `GET /api/oidc-config`. The profile read is ours rather than
+  better-auth's: the address is the primary one from `/user/emails` with its `verified` flag, which
+  is what lets a sign-in link to an existing unverified account like the other providers do. The
+  public profile address is never used, and a failed read of either endpoint fails the sign-in. It
+  always reads github.com's API, not `GITHUB_API_URL`. Tests: `oidcConfig.test.ts`.
 
 - MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
   (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; a refresh issues a new refresh token in a
@@ -1615,6 +1722,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
     `main` as a squash, so the PR title becomes the commit subject).
   - `.github/workflows/cla.yml` - CLA check (this is an AGPL-3.0 project with CLA-based
     contribution).
+  - `.github/workflows/publish-cli.yml` - publishes the doop CLI to npm as `@doop-design/cli` on a `cli-v*` tag
+    ([RELEASE.md](RELEASE.md#doop-cli-npm)).
   - `.github/workflows/desktop.yml` / `desktop-release.yml` - Tauri desktop app CI and installer
     release (tag `desktop-v*`, universal macOS DMG, Windows NSIS, Linux AppImage/.deb/.rpm,
     optional Apple signing/notarization).

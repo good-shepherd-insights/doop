@@ -102,6 +102,7 @@ import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
+import { mountAgentApi } from './agentApi.ts'
 import { createImportedWebpageFrame } from './webpageImport.ts'
 import { refundUnlessDone } from './chargedWork.ts'
 import { RendererBusyError } from './renderBrowser.ts'
@@ -109,6 +110,7 @@ import { getAsset, reconcileAssetRefs, beginTicketUpload, endTicketUpload, creat
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
 import { mountEditorPublicRoutes, mountEditorSessionRoutes } from './editorConnect.ts'
+import { mountCliPublicRoutes, mountCliSessionRoutes } from './cliConnect.ts'
 import * as backgrounds from './backgrounds.ts'
 import { serveIcon } from './iconProxy.ts'
 import { servePhoto } from './photoProxy.ts'
@@ -135,6 +137,7 @@ import {
   CUSTOM_API_TYPES,
 } from '../shared/customProvider.ts'
 import { setStoredDefault } from './agentDefaults.ts'
+import { exceedsCardTargetLimit, MAX_CARD_TARGETS } from '../shared/cardScope.ts'
 import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
@@ -975,6 +978,9 @@ for (const extension of extensions) {
 
 app.use(express.json({ limit: '10mb' }))
 mountEditorPublicRoutes(app)
+mountCliPublicRoutes(app)
+/* agent keys, not browser sessions: ahead of the session gate on /api */
+mountAgentApi(app)
 app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
   handleGeminiCloudMcp(req, res).catch(next)
 })
@@ -984,7 +990,7 @@ app.all('/local-agent/mcp/:id', (req, res, next) => {
 
 /* Where a brand-new account lands: the canvas signup created for it
    (server/auth.ts databaseHooks), where the demo agent is waiting to
-   perform. better-auth sends new Google / Microsoft / SSO users here as
+   perform. better-auth sends new Google / Microsoft / GitHub / SSO users here as
    their newUserCallbackURL and the email form comes here too, so every
    signup path shares one landing. Signed out, or without a canvas of their
    own any more, the dashboard will do. Ahead of the /api session guard:
@@ -1115,6 +1121,7 @@ app.use('/api', async (req, res, next) => {
 })
 
 mountEditorSessionRoutes(app)
+mountCliSessionRoutes(app)
 
 /* Frames in REST answers. A client that composes frames itself says so with a header
    (shared/frameCompose.ts) and is answered with their source. Every other one (the
@@ -3841,6 +3848,9 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const title = String(req.body?.title ?? '').trim()
   if (!title) return res.status(400).json({ error: 'empty title' })
+  if (exceedsCardTargetLimit(req.body?.scope)) {
+    return res.status(400).json({ error: `Select up to ${MAX_CARD_TARGETS} targets per prompt` })
+  }
   const gate = await allowance.consumeResidentTask(req.user!.id)
   if (!gate.ok) {
     return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -3855,7 +3865,10 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
     req.body?.scope,
     req.body?.runner,
   )
-  if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
+  if (!card) {
+    await allowance.refundResidentTask(gate, req.user!.id)
+    return res.status(404).json({ error: 'Canvas or selected targets no longer available' })
+  }
   res.json(card)
 })
 
