@@ -36,6 +36,7 @@ const resident = await import('../server/resident.ts')
 const screenshot = await import('../server/screenshot.ts')
 const propagation = await import('../server/propagation.ts')
 const { stillToCheck } = await import('../server/changeChecks.ts')
+const { instancesIn } = await import('../server/componentActions.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
 
 type RunState = Parameters<typeof resident.execTool>[3]
@@ -80,7 +81,7 @@ const pending = (state: RunState) => resident.uncheckedChanges(state, canvasId)
 const squareCorners = () =>
   call('update_component', { component: 'Button', css: '.btn { border-radius: 0; background: #111; color: #fff }' })
 const shot = (frameId: string) => call('screenshot_frame', { frame_id: frameId })
-const editNotes = () => call('edit_frame_html', { frame_id: notesId, find: 'Lanes', replace: 'Pools' })
+const editNotes = () => call('edit_frame_html', { frame_id: notesId, old_str: 'Lanes', new_str: 'Pools' })
 const buttonOwed = [expect.objectContaining({ component: expect.objectContaining({ name: 'Button' }) })]
 
 /* A Button component on two screens, as in the playtest, and two plain frames. */
@@ -149,7 +150,8 @@ describe('what a run still has to check', () => {
   it('still asks for a look at a frame the run wrote itself', async () => {
     const state = runState()
     await resident.execTool(squareCorners(), canvasId, actor(), state)
-    const instanceId = /data-doop-id="([^"]+)"[^>]*data-doop-instance/.exec(store.getFrame(poolId)!.html)?.[1]
+    const instanceId = instancesIn(store.getFrame(poolId)!)[0]?.instance_id
+    expect(instanceId).toBeDefined()
     await exec(state, 'update_instances', { frame_id: poolId, instances: [{ instance_id: instanceId, props: {} }] })
     /* the main shows the component change, not the screen that was written */
     await resident.execTool(shot(mainFrameId), canvasId, actor(), state)
@@ -297,12 +299,12 @@ describe('a run through the API', () => {
   it.each([
     [
       'another frame',
-      () => call('edit_frame_html', { frame_id: hoursId, find: 'Open late', replace: 'Open till ten' }),
+      () => call('edit_frame_html', { frame_id: hoursId, old_str: 'Open late', new_str: 'Open till ten' }),
       () => hoursId,
     ],
     [
       'the frame it had just checked',
-      () => call('edit_frame_html', { frame_id: notesId, find: 'Pools', replace: 'Pools near you' }),
+      () => call('edit_frame_html', { frame_id: notesId, old_str: 'Pools', new_str: 'Pools near you' }),
       () => notesId,
     ],
   ])('is reminded again when its fix-up changes %s', async (_what, fixUp, checked) => {

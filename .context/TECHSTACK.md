@@ -17,7 +17,8 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
 
 ## 2. Core Frameworks and Libraries
 
-- Express 4.19.2 - HTTP server framework in `server/`.
+- Express 5.3 - HTTP server framework in `server/`: a rejected async handler reaches the error handlers, and route
+  paths use path-to-regexp 8 syntax (a named wildcard, `/{*splat}`; no `?`, `(` or regex in a path string).
 - React 18.3.1 - UI framework in `src/`.
 - Zustand 4.5.4 - client-side state management.
 - Element ids (`shared/elementId.ts`): anything outside a frame that points at an element
@@ -334,7 +335,11 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   call itself threw on the person's own connection, never one of ours or a server-tier one. A
   failure the relay words itself (`fromDoop`: the desktop went away, a worker is down) is shown as it
   is. A shell from before `limitReached` is read by its fallback text (`shellResult`).
-  Tests: `runFailure.test.ts`, `result_event_reads_is_error_and_errors` in `claude.rs`.
+  The shell's page polls the relay every 3s under an id it draws per page load
+  (`src/lib/localAgent.ts`), and one id per account answers: another is kept out only while the
+  current one is online and running a job, so a reloaded page takes over an idle one at once and a
+  reload mid-run still ends that run as disconnected (`poll` in `server/localAgentRuns.ts`).
+  Tests: `runFailure.test.ts`, `localAgentRuns.test.ts`, `result_event_reads_is_error_and_errors` in `claude.rs`.
 - Checked work (`server/changeChecks.ts`, its header has the rules): a resident run on a card must have
   looked at what it changed before it finishes. Tests: `residentChecks.test.ts`.
 - Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected
@@ -355,6 +360,12 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
   sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
   `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
+- Gemini keys (`gemini-key`) run on the same transport against Google's OpenAI-compatibility
+  endpoint (`GEMINI_OPENAI_CHAT_URL`). Gemini 3 and later sign tool calls
+  (`tool_calls[].extra_content.google.thought_signature`, on the first call of a parallel set) and
+  refuse (400) the next request if a call comes back unsigned, so a call's `extra_content` stays
+  on its `tool_use` block and goes back out on the same call, for every provider that sends one.
+  Tests: the `Gemini thought signatures` case in `chatCompletionsAgent.test.ts`.
 - Custom providers (`shared/customProvider.ts`, `server/customProviders.ts`,
   `server/customProviderFetch.ts`, `src/components/CustomProviderForm.tsx`): any OpenAI Chat
   Completions or Anthropic Messages endpoint, added in Settings → Doop Agent by name, API type, base
@@ -426,6 +437,26 @@ server/index.ts` in prod. `erasableSyntaxOnly` and `verbatimModuleSyntax` in tsc
   migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
   `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
   `localAgentRouting.test.ts`.
+- Shared tool shapes (`server/agentToolShapes.ts`): every tool both MCP agents and the resident call takes its
+  parameters from one zod shape, there or beside its handler (`COMPONENT_TOOLS`). `server/mcp.ts` registers it with
+  its call context (`canvas_id`, `agent_name`); the resident keeps each one in `SHARED_PARAMETERS` (`server/resident.ts`, typed so a
+  shared tool cannot be left out) and sends it as JSON Schema (`jsonSchemaOf`, the MCP SDK's conversion options), with
+  its own wording for a parameter its run reads differently (a page from its page
+  list, the comment named in its request), `required` for what a run must pass, `omit` for a file on the agent's
+  own machine and `extend` for run state (`awaiting_answer`, `as_reference`). Tool descriptions stay with each
+  surface. A resident call is checked against that same zod before its handler runs, as an MCP call is
+  (`checkedInput`): a wrong type, a missing parameter or a value past its bound is refused with what is wrong, and
+  the handler gets the checked input (text trimmed, defaults filled in). Unlike MCP, null for an optional parameter
+  counts as not given, a tool's old parameter names are read as the new ones (`OLD_SPELLINGS`: `find`/`replace`,
+  `page_id`), and parameters it does not list are kept. The resident-only tools with a hand-written schema are not
+  checked. The simple shared tools also share their handler (`server/sharedToolHandlers.ts`: `update_canvas`,
+  `create_canvas_page`, `set_canvas_pages`, `get_prototype`, `set_prototype_start`): it does
+  the work and gives the answer, the same JSON on both surfaces. Around it MCP checks the account's access to the
+  canvas (the handler's `access`), marks the agent present and adds the feedback waiting for it; the Doop Agent
+  counts a call that changed how the canvas is organised (`arranged`) as delivered work. The other shared tools still
+  have a handler on each surface. Tests: `agentToolParity.test.ts` (names, then each parameter's type, bounds and
+  requiredness, with the exceptions listed), `residentPageTools.test.ts` (the check), `sharedToolHandlers.test.ts`
+  (both surfaces answer alike).
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
@@ -1208,7 +1239,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   several picked layers (or inside one) moves them all: the rest ride the gesture as `followers`
   (`styleGesture` `begin`), each translated by the pressed layer's delta, put back on Escape and
   saved with it as one step; a multi-pick never takes a layout drop, and the pressed layer
-  becomes the pick's primary.
+  becomes the pick's primary. ⌥⇧ on such a drag copies every picked layer instead
+  (`styledCopies`, each copy right after its original and in a carried-style scope of its own):
+  the copies are the gesture and its followers, the originals stay, and the copies become the
+  pick. A locked layer in the pick stops the copy, as it stops ⌘D. Only a single copy can be
+  dragged off its frame; several stay inside it, as a multi-pick move does.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
   size separately from transformed bounds. Pending pointer events are buffered until its
   reply, so fast drags and cancellation remain reliable. `src/lib/drawingMove.ts` preserves markup and translates coordinates when
@@ -1429,7 +1464,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   composer, a thread reply or the Comments panel's reply lists the canvas's people (owner,
   members, workspace members, from `GET /api/canvases/:id/people`, comment role, names and faces
   only, asked again whenever a field mounts) and, for editors, its agents; the thread draws
-  mentions in brand. Names are not unique, so the picker sends the ids it picked as `mentions`
+  mentions in brand, and bare `http(s)://` and `www.` addresses as links that open in a new tab
+  (`src/lib/linkify.ts`, less a sentence's trailing punctuation; a click in a Comments panel row
+  opens the link, not the thread). Names are not unique, so the picker sends the ids it picked as `mentions`
   beside the text (the latest pick of a name in the draft; an agent picked over a person
   named like its handle rides as `agent:<id>`, so the agent gets it). The routes, MCP `reply_to_comment` and the resident's reply resolve the text
   once (`resolveCommentMentions` → `resolvePersonMentions`) against everyone eligible (those
@@ -1444,7 +1481,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   of `server/links.ts`'s `commentLink`): "Copy link to comment" on a pin's right-click menu, an
   open Comments panel row's, and the link button on a thread's first message. Opening one,
   `Stage` follows the root to its current frame, not the one the link names. Tests:
-  `personMentions.test.ts`, `commentLink.test.ts`, the `@mentions` cases in
+  `personMentions.test.ts`, `linkify.test.ts`, `commentLink.test.ts`, the `@mentions` cases in
   `commentNotifications.test.ts`, the picker cases in `commentsPanel.test.tsx`, the mention and
   `/people` cases in `canvasCommentsRoute.test.ts`, the person case in `residentComments.test.ts`.
 - Chat in the Agents tab (`src/components/AgentChat.tsx`, `src/lib/agentChat.ts`): under Recent
@@ -1522,8 +1559,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   (`replace`: MCP and resident `set_frame_html`, the resident's rewrite commit). The scanner skips
   `<doop-use` text in scripts, styles, textareas, titles and comments and in names like
   `<doop-user-chip>`. Tests: `componentDrops.test.ts`, the `<doop-use>` cases in `inlineData.test.ts`. A component's CSS is read with CSS escapes honoured (Tailwind's `\'` in
-  `[class*='size-']` is part of a class name, not a string); a sheet that still cannot be read to the
-  end (a string or block left open, text outside a rule) is reported as `css_not_read` with where it
+  `[class*='size-']` is part of a class name, not a string) and comments cut by the same read (a `/*`
+  inside a string or an unquoted `url(…)` is text); a sheet that still cannot be read to the end (a
+  string, block or comment left open, text outside a rule) is reported as `css_not_read` with where it
   went wrong, beside `css_unmatched`. The CSS written for a component (its `data-doop-component-source`
   block) is kept apart from the page's: a rule of it naming nothing in the main is kept, scoped by
   its subject, when it is anchored to the component (a state, a script-added element), and left out
@@ -1757,7 +1795,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - React 18.3.1 + Vite 8 - SPA, entry at `index.html`.
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
-- Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
+- Tauri 2.11 (`tauri` crate, `desktop/src-tauri`) with `@tauri-apps/cli` 2.12.6 - desktop app wrapper around the
+  web build.
 - Frame runtime (`src/frame-runtime/`): the script every frame iframe runs (morphing posted HTML in,
   hit testing, text editing, styles, the key relay, prototype triggers), written as TypeScript modules
   and type-checked and linted with the rest of `src/`. `vitePlugin.ts` (registered in `vite.config.ts`,
@@ -1805,7 +1844,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Workspace and Admin alike (a page's own group, such as the admin indexes, goes in as children;
   Settings draws its own rail from the same `ui/dash.tsx` parts); it owns
   the ⌘K search palette (`CanvasSearchModal.tsx`), the connect-an-agent modal, the collapsed
-  narrow state (remembered in `localStorage` under `doop-rail`) and the account face at the bottom.
+  narrow state (remembered in `localStorage` under `doop-rail`) and the account row at the bottom: face,
+  name and an up/down chevron, all one trigger for the account menu (`AccountMenu named`; the narrow
+  rail keeps the face alone).
   From another page the rail sends scope picks home as `/?scope=` and new workspaces as
   `/?workspace=new`. The workspace in view opens under its row: All canvases, People, Fonts, Libraries, and for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
   they switch its pane in place, elsewhere they go to `/w/<id>?pane=…`, and the page keeps the
@@ -1813,6 +1854,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   blink its rows out, and fades only when collapsed or expanded. Home warms the Workspace page's
   detail while a workspace's canvases are in view (`src/lib/workspaceCache.ts`), so its panes draw on
   the first frame instead of a skeleton; the page refetches on arrival.
+- Error boundaries (`src/components/ui/error-boundary.tsx`): a render error unmounts everything up to the nearest
+  `ErrorBoundary`, which shows one line in the failed area's place ("This couldn't be shown", Retry) and reports it:
+  to the console and to PostHog (`captureCaughtError`, with the component that threw), once per repeated failure.
+  React keeps a caught error from `window.onerror`, so the exception autocapture would miss it. Where they sit:
+  inside every `Panel` and `PanelTabPanel` (the panel keeps its place, the others and the composer keep running),
+  around the canvas page's floating chrome (a panel that fails in its own body), each frame in the Stage's
+  `FrameStack` (`FrameFailed` keeps the frame's box; a new version of the frame retries by itself) and the app
+  root. Tests: `errorBoundary.test.tsx`.
 
 ## 11. Developer Experience Tooling
 

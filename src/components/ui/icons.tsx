@@ -50,7 +50,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsDownUp,
+  ChevronsUpDown,
   Circle,
+  CircleAlert,
   CircleHelp,
   CirclePlus,
   Clipboard,
@@ -210,6 +212,7 @@ export const TrashIcon = icon(Trash2)
 export const CheckIcon = icon(Check)
 export const ChevronRightIcon = icon(ChevronRight)
 export const ChevronDownIcon = icon(ChevronDown)
+export const ChevronsUpDownIcon = icon(ChevronsUpDown)
 export const AlignStartVerticalIcon = icon(AlignStartVertical)
 export const AlignCenterVerticalIcon = icon(AlignCenterVertical)
 export const AlignEndVerticalIcon = icon(AlignEndVertical)
@@ -357,6 +360,8 @@ export const EditIcon = icon(Pencil)
 export const EyeIcon = icon(Eye)
 export const EyeClosedIcon = icon(EyeOff)
 export const CircleIcon = icon(Circle)
+/** a part of the page failed to draw (ErrorFallback) */
+export const AlertIcon = icon(CircleAlert)
 /** a web page — the import-a-site tool, and the community gallery */
 export const WebIcon = icon(Globe)
 /** a live app broadcasting its screens — the design-sync import */

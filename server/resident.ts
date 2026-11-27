@@ -6,7 +6,6 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import { wholeDocument } from './frameCompose.ts'
 import { layerExport } from './layerExport.ts'
-import { MAX_EXPORT_SCALE, MIN_EXPORT_SCALE } from '../shared/exportScale.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { skillsForCanvas } from './skills.ts'
 import { skillsBlock } from '../shared/skills.ts'
@@ -20,6 +19,8 @@ import {
   tokensBrief,
   NO_TOKENS_BRIEF,
   tokensCss,
+  tokensMarkdown,
+  tokensNamed,
   tokensTailwind,
   type TokenResult,
 } from '../shared/designTokens.ts'
@@ -34,7 +35,7 @@ import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
-import { FIT_AXES, FIT_ON, fitNotes, fitWrittenFrame, readFitAxes, updateFrameMetaWithFit } from './frameFit.ts'
+import { FIT_ON, fitNotes, fitWrittenFrame, readFitAxes, updateFrameMetaWithFit } from './frameFit.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName } from '../shared/agents.ts'
 import { resolvePersonMentions, withoutAgentMentions, type Mentionable } from '../shared/personMentions.ts'
 import { commentPeople, threadAuthorIds } from './canvasPeople.ts'
@@ -60,6 +61,7 @@ import {
   SYSTEM_FIRST,
 } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
+import { TOOL_SHAPES, type SharedToolName } from './agentToolShapes.ts'
 import { z } from 'zod'
 import {
   catalog,
@@ -106,7 +108,6 @@ import {
   previewFrame,
   previewProps,
 } from './componentPreview.ts'
-import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import {
   describeInspiration,
   INSPIRATION_NO_MATCH_NOTE,
@@ -116,8 +117,9 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, MAX_CANVAS_NAME, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
-import { addPage, pageList, parsePageList, savePages } from './pageTools.ts'
+import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
+import { frameMetaError, pageList } from './pageTools.ts'
+import { sharedToolHandler } from './sharedToolHandlers.ts'
 import { runCanvasWrite } from './canvasWrites.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
@@ -430,24 +432,24 @@ export function placeBeside(
   return { x, y }
 }
 
-/** What the create_frame tool asks for, placed: the model's own x/y win,
- *  otherwise the run's placement (the comment's page, and beside its pin). */
+/** What the create_frame tool asks for, placed: the model's own page and x/y win,
+ *  otherwise the run's placement (the comment's page, and beside its pin when the
+ *  frame lands on that page). */
 export function createFrameInput(
-  raw: { name?: string; width?: number; height?: number; html: string; x?: number; y?: number },
+  raw: { name?: string; width?: number; height?: number; html: string; x?: number; y?: number; pageId?: string },
   placement: FramePlacement | undefined,
   canvas: Canvas | undefined,
 ) {
   const size = { width: Number(raw.width) || 800, height: Number(raw.height) || 500 }
+  const pageId = raw.pageId || placement?.pageId
   const chosen = Number.isFinite(raw.x) && Number.isFinite(raw.y) ? { x: Number(raw.x), y: Number(raw.y) } : undefined
-  const beside =
-    !chosen && placement?.near && canvas
-      ? placeBeside(placement.near, size, pageFrames(canvas, placement.pageId))
-      : undefined
+  const near = placement?.pageId === pageId ? placement?.near : undefined
+  const beside = !chosen && near && canvas && pageId ? placeBeside(near, size, pageFrames(canvas, pageId)) : undefined
   return {
     name: String(raw.name || 'Frame'),
     ...size,
     html: raw.html,
-    ...(placement ? { pageId: placement.pageId } : {}),
+    ...(pageId ? { pageId } : {}),
     ...(chosen ?? beside ?? {}),
   }
 }
@@ -1349,56 +1351,154 @@ function currentStatus(canvasId: string, actor: Actor): string {
   return actions.getTasks(canvasId).find((t) => isAgentsTask(t, actor) && !t.endedAt && !t.queuedBy)?.status ?? ''
 }
 
+interface ResidentSchemaOptions<Key extends string> {
+  /** the Doop Agent's own wording, for a parameter its run gives another meaning (a page from its page list) */
+  describe?: Partial<Record<Key, string>>
+  /** parameters optional over MCP that a run must pass */
+  required?: Key[]
+  /** parameters only an MCP agent can use (a file on its own machine) */
+  omit?: Key[]
+  /** parameters only a run has */
+  extend?: z.ZodRawShape
+}
+
+/**
+ * A tool's parameters as the Doop Agent takes them: the one zod shape MCP registers (agentToolShapes.ts,
+ * componentTools.ts), with the run's own options. Its model is shown them (`jsonSchemaOf`) and its calls are
+ * checked against them (`checkedInput`), so the two surfaces cannot drift apart.
+ */
+function residentParameters<Shape extends z.ZodRawShape>(
+  shape: Shape,
+  options: ResidentSchemaOptions<keyof Shape & string> = {},
+): z.AnyZodObject {
+  const { describe = {}, required = [], omit = [], extend = {} } = options
+  const wording: Partial<Record<string, string>> = describe
+  const fields: z.ZodRawShape = {}
+  for (const [key, field] of Object.entries(shape)) {
+    if ((omit as string[]).includes(key)) continue
+    const kept = (required as string[]).includes(key) && field instanceof z.ZodOptional ? field.unwrap() : field
+    const description = wording[key] ?? field.description
+    fields[key] = description ? kept.describe(description) : kept
+  }
+  return z.object({ ...fields, ...extend })
+}
+
+/** Parameters as the model reads them: JSON Schema, converted with the options the MCP SDK converts with. */
+function jsonSchemaOf(parameters: z.AnyZodObject): Anthropic.Tool['input_schema'] {
+  return zodToJsonSchema(parameters, { strictUnions: true, pipeStrategy: 'input' }) as Anthropic.Tool['input_schema']
+}
+
+/** Each shared tool's parameters, with the Doop Agent's own wording where its run reads one differently. A shared
+ *  tool left out, or a name that is not one, fails the type check. */
+const SHARED_PARAMETERS = {
+  set_status: residentParameters(TOOL_SHAPES.set_status),
+  create_frame: residentParameters(TOOL_SHAPES.create_frame, {
+    required: ['width', 'height'],
+    describe: {
+      pageId:
+        'The page to create it on, from the page list (create_canvas_page returns a new one). Optional: left out, the frame lands on the page the request is about, else the first page.',
+      html: 'Complete, self-contained HTML document',
+      width: 'px, e.g. 1200',
+      height: 'px, e.g. 630',
+      x: 'Canvas position in px. Optional: left out, the frame lands beside the pin of a canvas comment on that page, else to the right of the existing frames.',
+      y: 'Canvas position in px. Optional, see x.',
+      /* a run streams a rewrite with begin/append/commit_frame_rewrite, not append_frame_html */
+      fit_to_content: FIT_ON.create,
+    },
+  }),
+  inspect_frame: residentParameters(TOOL_SHAPES.inspect_frame),
+  edit_frame_html: residentParameters(TOOL_SHAPES.edit_frame_html),
+  set_frame_html: residentParameters(TOOL_SHAPES.set_frame_html, {
+    describe: { html: 'Complete, self-contained HTML document' },
+  }),
+  upload_font: residentParameters(TOOL_SHAPES.upload_font, {
+    omit: ['local_file', 'data'],
+    required: ['source_url'],
+  }),
+  search_images: residentParameters(TOOL_SHAPES.search_images),
+  generate_image: residentParameters(TOOL_SHAPES.generate_image),
+  list_backgrounds: residentParameters(TOOL_SHAPES.list_backgrounds),
+  search_icons: residentParameters(TOOL_SHAPES.search_icons),
+  search_logos: residentParameters(TOOL_SHAPES.search_logos),
+  view_website: residentParameters(TOOL_SHAPES.view_website),
+  import_webpage: residentParameters(TOOL_SHAPES.import_webpage, {
+    extend: {
+      as_reference: z
+        .boolean()
+        .describe(
+          'True for source material that must remain unchanged; false when the imported snapshot itself is the deliverable',
+        ),
+    },
+  }),
+  get_reference: residentParameters(TOOL_SHAPES.get_reference, {
+    describe: { reference_id: 'Reference id from the pinned-references list in your request' },
+  }),
+  search_inspiration: residentParameters(TOOL_SHAPES.search_inspiration),
+  save_decision: residentParameters(TOOL_SHAPES.save_decision, {
+    describe: {
+      decision: `The decision and its reason, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic. E.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"`,
+    },
+  }),
+  reply_to_comment: residentParameters(TOOL_SHAPES.reply_to_comment, {
+    describe: {
+      comment_id: 'The comment id given in the request (any comment in the thread works)',
+      text: 'The reply, written to the person who asked',
+    },
+    extend: {
+      awaiting_answer: z
+        .boolean()
+        .optional()
+        .describe(
+          'true when you are asking something you need answered before you can do the work: the request is handed back to the person, the thread stays open for their reply, and you should finish without changing a frame.',
+        ),
+    },
+  }),
+  set_frame_approval: residentParameters(TOOL_SHAPES.set_frame_approval),
+  resolve_comment: residentParameters(TOOL_SHAPES.resolve_comment, {
+    describe: { comment_id: 'The comment id given in the request' },
+  }),
+  report_issue: residentParameters(TOOL_SHAPES.report_issue),
+  share_feedback: residentParameters(TOOL_SHAPES.share_feedback),
+  set_guidelines: residentParameters(TOOL_SHAPES.set_guidelines),
+  get_tokens: residentParameters(TOOL_SHAPES.get_tokens),
+  create_tokens: residentParameters(TOOL_SHAPES.create_tokens),
+  set_tokens: residentParameters(TOOL_SHAPES.set_tokens),
+  set_token_themes: residentParameters(TOOL_SHAPES.set_token_themes),
+  update_frame: residentParameters(TOOL_SHAPES.update_frame),
+  update_canvas: residentParameters(TOOL_SHAPES.update_canvas),
+  create_canvas_page: residentParameters(TOOL_SHAPES.create_canvas_page),
+  set_canvas_pages: residentParameters(TOOL_SHAPES.set_canvas_pages, {
+    describe: { expectedPages: 'The ordered pages as you last saw them' },
+  }),
+  get_prototype: residentParameters(TOOL_SHAPES.get_prototype),
+  set_prototype_start: residentParameters(TOOL_SHAPES.set_prototype_start, {
+    describe: { pageId: "The page; defaults to the start frame's page (the first page when clearing)" },
+  }),
+  export_layer: residentParameters(TOOL_SHAPES.export_layer),
+} satisfies Record<SharedToolName, z.AnyZodObject>
+
+/* screenshot_component is the Doop Agent's preview of get_component_preview, which has no shared shape */
+const SCREENSHOT_COMPONENT_PARAMETERS = residentParameters({ component: z.string(), props: previewProps })
+
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'set_status',
     description:
       'Broadcast a one-line "what I am doing right now" to everyone watching the canvas. Call it when you start and whenever your focus shifts.',
-    input_schema: {
-      type: 'object',
-      properties: { status: { type: 'string', description: 'Present tense, under 80 chars' } },
-      required: ['status'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_status),
   },
   {
     name: 'create_frame',
     description:
       'Add a new frame to the canvas — use this when a queued card asks for a new design rather than a change to an existing frame. Streams in live for viewers. ' +
       COMPOSE_CHECK,
-    input_schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' },
-        width: { type: 'number', description: 'px, e.g. 1200' },
-        height: { type: 'number', description: 'px, e.g. 630' },
-        html: { type: 'string', description: 'Complete, self-contained HTML document' },
-        x: {
-          type: 'number',
-          description:
-            'Canvas position in px. Optional: left out, the frame lands on the page the request is about — beside the pin of a canvas comment, else to the right of the existing frames.',
-        },
-        y: { type: 'number', description: 'Canvas position in px. Optional, see x.' },
-        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.create },
-      },
-      required: ['name', 'width', 'height', 'html'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.create_frame),
   },
   {
     name: 'inspect_frame',
     description:
       "Inspect the rendered page without relying on class names. Returns a compact semantic element outline, visible text, geometry, computed colors, typography, radii, shadows, and CSS variables, plus `problems`: content past the frame's edge, text cut off by its box, and text or controls overlapping (candidates to check against the screenshot; a deliberate overlap is fine). Pass selectors to report on those elements instead of the automatic outline. Use this before working with large frames, for cross-frame visual references and to pin down layout faults.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        frame_id: { type: 'string' },
-        selectors: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'CSS selectors to report on (up to 20 matches each) instead of the automatic outline',
-        },
-      },
-      required: ['frame_id'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.inspect_frame),
   },
   {
     name: 'get_frame_html',
@@ -1421,31 +1521,15 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'edit_frame_html',
     description:
-      'Exact find/replace in a frame\'s HTML — the change morphs into the live render. Use for small, targeted changes. "find" must occur exactly once. "replace" must open and close as many <doop-use> and <template> tags as "find" does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        frame_id: { type: 'string' },
-        find: { type: 'string' },
-        replace: { type: 'string' },
-      },
-      required: ['frame_id', 'find', 'replace'],
-    },
+      "Exact find/replace in a frame's HTML — the change morphs into the live render. Use for small, targeted changes. old_str must occur exactly once. new_str must open and close as many <doop-use> and <template> tags as old_str does: an edit that leaves one unclosed is refused, so include the closing tags in the same edit or replace the whole instance.",
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.edit_frame_html),
   },
   {
     name: 'set_frame_html',
     description:
       'Replace a frame with a complete compact HTML document in one call. Use only when the entire html argument is under 12,000 characters; use the staged rewrite tools for larger documents. ' +
       COMPOSE_CHECK,
-    input_schema: {
-      type: 'object',
-      properties: {
-        frame_id: { type: 'string' },
-        html: { type: 'string', description: 'Complete, self-contained HTML document' },
-        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.set },
-      },
-      required: ['frame_id', 'html'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_frame_html),
   },
   {
     name: 'begin_frame_rewrite',
@@ -1485,444 +1569,161 @@ const TOOLS: Anthropic.Tool[] = [
     name: 'upload_font',
     description:
       'Add a font file (ttf/otf/woff/woff2, one face per file, max 10 MB) to the font library this canvas designs with, from a public URL of the file itself (not a CSS file). Then name the family in CSS (font-family: "Family", sans-serif) and Doop writes the @font-face. This is how a font that is not in the canvas library or the hosted fonts gets into a design: never inline a font file as a base64 data: URI. Upload each weight and style you use as its own file.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        source_url: { type: 'string', description: 'Public http(s) URL of the font file' },
-        file_name: { type: 'string', description: 'The file name the library shows, e.g. "Oxanium-Light.ttf"' },
-      },
-      required: ['source_url'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.upload_font),
   },
   {
     name: 'search_images',
     description:
       'Search free stock photography and get candidate photos WITH visual thumbnails — look at them and pick the one that fits the frame. Use concrete, scene-level queries ("team collaborating loft office", not "business"). Embed the chosen image_url directly in frame HTML with object-fit: cover and a real alt text.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Scene-level description of the photo you want' },
-        orientation: {
-          type: 'string',
-          enum: ['landscape', 'portrait', 'square'],
-          description: 'Match the slot the photo will fill',
-        },
-        count: { type: 'number', description: 'Candidates to return, 1-8, default 5' },
-      },
-      required: ['query'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_images),
   },
   {
     name: 'generate_image',
     description: `Generate an image from a text prompt with AI and get a permanent URL to embed, plus a preview to judge. ${imageGen.IMAGE_PROVIDER_NOTE} For visuals stock search cannot supply: brand-specific illustration, product renders, mascots, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It spends the requester's quota or money and takes 20–60 seconds, so write ONE considered prompt (subject, style, composition, palette hexes, lighting, what to leave out) and refine a near miss by prompt.`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        prompt: { type: 'string', description: 'What to draw: subject, style, composition, palette, lighting, mood' },
-        aspect: {
-          type: 'string',
-          enum: [...imageGen.IMAGE_ASPECTS],
-          description: 'square 1024×1024 (default), landscape 1536×1024, portrait 1024×1536 — match the slot',
-        },
-        quality: {
-          type: 'string',
-          enum: [...imageGen.IMAGE_QUALITIES],
-          description: 'low is fast and cheap; default medium',
-        },
-      },
-      required: ['prompt'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.generate_image),
   },
   {
     name: 'list_backgrounds',
     description:
       "Browse a curated library of premium backgrounds for hero sections, section bands and bento tiles (glows, grainy meshes, aurora, neon, painterly scenes) as a page of thumbnails, each with palette hexes and a ready-to-paste CSS line that includes a legibility scrim. Reach for it when a hero or full-bleed section wants atmosphere, depth or a focal glow; a quiet typographic design can stay flat, but a default two-stop gradient is rarely right. Filter by tone (light/dark — match your copy color), slot and style; an optional query only reorders. Then decide like a designer: does one genuinely fit the frame's style and palette? If yes use it and put copy in its text_zone; if not, call again with a different filter or draw the background yourself.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Mood / palette words to put first — reorders, never filters' },
-        tone: {
-          type: 'string',
-          enum: [...backgrounds.BACKGROUND_TONES],
-          description: 'light = dark copy on it, dark = light copy on it',
-        },
-        style: { type: 'string', enum: [...backgrounds.BACKGROUND_STYLES], description: 'Restrict to one look' },
-        slot: {
-          type: 'string',
-          enum: [...backgrounds.BACKGROUND_SLOTS],
-          description: 'hero, section band, or card/bento tile',
-        },
-        count: { type: 'number', description: 'Thumbnails to return, 1-24, default 12' },
-      },
-      required: [],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.list_backgrounds),
   },
   {
     name: 'search_icons',
     description:
       'Search 200,000+ open-source UI icons, returned as hotlinkable SVG URLs. Search the concept ("shopping cart", "arrow right"). Results are semantically named ids — pick by name. For company logos use search_logos instead.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Icon concept, e.g. "shopping cart"' },
-        limit: { type: 'number', description: 'Max results, default 24' },
-      },
-      required: ['query'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_icons),
   },
   {
     name: 'search_logos',
     description:
       'Find a company\'s logo by brand name or domain — returns the company\'s real mark as a hotlinkable URL (thumbnail included when possible), plus open-source vector marks for well-known brands. The exact domain ("acme.io") resolves far more reliably than a name. Use for customer-logo walls, integration rows, testimonial cards, press bars. Favicon-sourced logos are small rasters — display at 32px or less, never scale up.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Company name or domain' },
-        count: { type: 'number', description: 'Candidates to return, 1-8, default 5' },
-      },
-      required: ['query'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_logos),
   },
   {
     name: 'view_website',
     description:
       'Read-only inspection of a public web page: acquires its current HTML and returns a locally rendered desktop screenshot plus visible text without changing the canvas. Use import_webpage instead when the page needs to land on the canvas as an editable HTML snapshot.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'The page URL — a bare domain like "acme.io" is loaded over https' },
-      },
-      required: ['url'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.view_website),
   },
   {
     name: 'import_webpage',
     description:
       'Import one public web page onto the current canvas as an editable HTML snapshot. Scripts and iframes are removed and stylesheets are inlined. Set as_reference=true when it is source material for a separate design; matching reference snapshots are reused across pipeline stages. Set false when importing or editing the snapshot itself is the deliverable; this creates a fresh deliverable copy. Call screenshot_frame on the returned frame.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'The page URL — a bare domain like "acme.io" is loaded over https' },
-        as_reference: {
-          type: 'boolean',
-          description:
-            'True for source material that must remain unchanged; false when the imported snapshot itself is the deliverable',
-        },
-      },
-      required: ['url', 'as_reference'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.import_webpage),
   },
   {
     name: 'get_reference',
     description:
       'Read a pinned style reference — a design a human marked "more like this" — as a rendered screenshot plus its HTML. References are listed in your request when the canvas has them. Match the reference\'s palette, typography and spacing in what you design.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        reference_id: { type: 'string', description: 'Reference id from the pinned-references list in your request' },
-      },
-      required: ['reference_id'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.get_reference),
   },
   {
     name: 'search_inspiration',
     description:
       'Search One Page Love\'s hand-curated gallery of real, well-designed live websites and SEE thumbnails of each, with their tags (style, colour, fonts, genre, sections). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages. Query the genre plus the look you want in the words the catalog is tagged with ("saas landing page, dark minimal", "finance, editorial", "portfolio, typographic", "pricing, illustrative"), not the product noun alone. The catalog is landing pages and one-page sites, not app screens: for a dashboard or app UI, query the product\'s register ("saas, minimal") and take the type, colour and density from it. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description:
-            'Genre + look, e.g. "saas landing page, dark minimal", "restaurant, retro", "finance, editorial"',
-        },
-        count: { type: 'number', description: 'Exemplars to return, default 4, max 6' },
-      },
-      required: ['query'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.search_inspiration),
   },
   {
     name: 'save_decision',
     description: `Record a design decision and why it was made, in the canvas Memory, so humans and later agents know what was committed to and the reason: a direction you chose (the exemplar you followed, the mood, the accent) or a change you made at someone's request (colours changed, corners rounded). A decision is the why, not a store for values: the palette, fonts and scale live in tokens (create_tokens, set_tokens). Save one decision and its rationale per call, at most ${MAX_DECISION_CHARS} characters, split by topic. Design taste only, never one-off content edits.`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        decision: {
-          type: 'string',
-          maxLength: MAX_DECISION_CHARS,
-          description: `The decision and its reason, at most ${MAX_DECISION_CHARS} characters; split longer feedback into separate calls by topic. E.g. "Followed oatside-soft-shelf: its candlelit warmth suits an evening grocery brand better than the bright, clinical set"`,
-        },
-      },
-      required: ['decision'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.save_decision),
   },
   {
     name: 'reply_to_comment',
     description:
       'Answer inside a comment thread on this canvas — the person who left the comment sees it under their pin. Use it when a request needs a decision only they can make, or deserves a word mid-task; your final message is posted into every thread you worked on automatically, so do not repeat it here. Plain prose and no agent @mentions; to bring a person in, write @ and their name as the thread spells it ("@Ana Souza") and they are emailed. Replying does not resolve the thread.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        comment_id: {
-          type: 'string',
-          description: 'The comment id given in the request (any comment in the thread works)',
-        },
-        text: { type: 'string', description: 'The reply, written to the person who asked' },
-        awaiting_answer: {
-          type: 'boolean',
-          description:
-            'true when you are asking something you need answered before you can do the work: the request is handed back to the person, the thread stays open for their reply, and you should finish without changing a frame.',
-        },
-      },
-      required: ['comment_id', 'text'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.reply_to_comment),
   },
   {
     name: 'set_frame_approval',
     description:
       'Mark a frame ready for dev, or move it back to draft, for the person who asked you. Only when they explicitly ask for that: never approve your own designs unasked. The approval is recorded as theirs, made through you, and starts any approval automations on the canvas like a human sign-off. Editing the HTML or size afterwards moves it to needs_review.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        frame_id: { type: 'string' },
-        status: { type: 'string', enum: ['ready_for_dev', 'draft'] },
-      },
-      required: ['frame_id', 'status'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_frame_approval),
   },
   {
     name: 'resolve_comment',
     description:
       'Close a comment thread you have fully dealt with, before finishing. Resolving the root closes the whole thread. Threads you were asked to work on are resolved for you when the run finishes, so call this only to close one early, or one you answered without changing a frame.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        comment_id: { type: 'string', description: 'The comment id given in the request' },
-      },
-      required: ['comment_id'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.resolve_comment),
   },
   {
     name: 'report_issue',
     description:
       'Tell the Doop team where Doop itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It never reaches the humans on the canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        category: { type: 'string', enum: [...AGENT_ISSUE_CATEGORIES] },
-        message: { type: 'string', description: 'What you tried, what happened, and what you expected or needed.' },
-        tool: { type: 'string', description: 'The tool involved, if any' },
-      },
-      required: ['category', 'message'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.report_issue),
   },
   {
     name: 'share_feedback',
     description:
       'Tell the Doop team how Doop could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It never reaches the humans on the canvas. Never include secrets.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        category: { type: 'string', enum: [...AGENT_IDEA_CATEGORIES] },
-        message: {
-          type: 'string',
-          description: 'What you were doing and what would have helped, or what worked well.',
-        },
-        tool: { type: 'string', description: 'The tool involved, if any' },
-      },
-      required: ['category', 'message'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.share_feedback),
   },
   {
     name: 'set_guidelines',
     description:
       "Create, replace or delete a named style guide on this canvas (markdown, max 24,000 chars; empty string deletes). Write rules other designers and agents can execute directly: palette hexes, font families, spacing/radius/shadow conventions, layout recipes, do/don't lists. Also how you persist a redesign audit (binding Direction + descriptive source baseline) so every later job inherits it.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Doc slug, e.g. "redesign-pipefile-com" (a-z, 0-9, hyphens)' },
-        markdown: { type: 'string', description: 'Full replacement markdown for this doc; empty string deletes it' },
-        title: {
-          type: 'string',
-          description:
-            'Pretty display name shown to humans, e.g. "Pipefile design system"; omit to keep the current one',
-        },
-      },
-      required: ['name', 'markdown'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_guidelines),
   },
   {
     name: 'get_tokens',
     description:
-      "This canvas's design tokens (CSS custom properties frames use as var(--name)), as JSON, a :root CSS block or a Tailwind v4 @theme block.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        types: { type: 'array', items: { type: 'string', enum: [...TOKEN_TYPES] } },
-        format: { type: 'string', enum: ['json', 'css', 'tailwind'] },
-      },
-    },
+      "This canvas's design tokens (CSS custom properties frames use as var(--name)), as JSON, a :root CSS block, a Tailwind v4 @theme block or markdown tables for a styleguide. Filter by type or a name glob.",
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.get_tokens),
   },
   {
     name: 'create_tokens',
     description:
       'Add design tokens to this canvas: each needs a CSS custom property name (--color-primary), a type and a value (a CSS value, or var(--other) to alias a token that exists or comes earlier in the batch). Names follow Tailwind v4 namespaces (--color-*, --spacing-*, --radius-*, --font-*, --text-*, --leading-*, --tracking-*, --container-*, --breakpoint-*). Reuse existing tokens before creating new ones. Use them in frames as var(--name), never the literal.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        tokens: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              type: { type: 'string', enum: [...TOKEN_TYPES] },
-              value: { type: 'string' },
-              themes: {
-                type: 'object',
-                description:
-                  'The value under a theme where it differs, e.g. { "dark": "#fff" }; a new name declares the theme',
-                additionalProperties: { type: 'string' },
-              },
-              description: { type: 'string' },
-            },
-            required: ['name', 'type', 'value'],
-          },
-        },
-      },
-      required: ['tokens'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.create_tokens),
   },
   {
     name: 'set_tokens',
     description:
       'Change (value, type, description), rename (new_name) or delete (delete: true) design tokens by name. Every frame naming a changed token is restyled at once.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        tokens: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              new_name: { type: 'string' },
-              type: { type: 'string', enum: [...TOKEN_TYPES] },
-              value: { type: 'string' },
-              themes: {
-                type: 'object',
-                description: "Theme values to set, merged in; null removes that theme's value",
-                additionalProperties: { type: ['string', 'null'] },
-              },
-              description: { type: 'string' },
-              delete: { type: 'boolean' },
-            },
-            required: ['name'],
-          },
-        },
-      },
-      required: ['tokens'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_tokens),
   },
   {
     name: 'set_token_themes',
     description:
       'Replace this canvas\'s token themes (light, dark, …) and their order. A frame switches theme with data-doop-theme="<theme>" on its <html> or on a subtree; a theme that leaves takes its values with it.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        themes: { type: 'array', items: { type: 'string' } },
-        renames: {
-          type: 'array',
-          description: 'Themes to rename first; their values follow. List the new name in themes.',
-          items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } },
-        },
-      },
-      required: ['themes'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_token_themes),
   },
   {
     name: 'update_frame',
     description:
-      "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        frame_id: { type: 'string' },
-        pageId: { type: 'string', description: 'The page to move the frame to, from the page list' },
-        name: { type: 'string' },
-        x: { type: 'number', description: 'Canvas position in px' },
-        y: { type: 'number', description: 'Canvas position in px' },
-        width: { type: 'number', description: 'px; the design is not rescaled' },
-        height: { type: 'number', description: 'px; the design is not rescaled' },
-        fit_to_content: { type: 'string', enum: [...FIT_AXES], description: FIT_ON.update },
-        locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
-      },
-      required: ['frame_id'],
-    },
+      "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), turn it (rotation), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.update_frame),
   },
   {
     name: 'update_canvas',
     description:
       'Rename this canvas: the name on its tab and in the dashboard. Everyone viewing it sees the new name at once. Pages are renamed with set_canvas_pages, frames with update_frame.',
-    input_schema: {
-      type: 'object',
-      properties: { name: { type: 'string', description: 'The new canvas name' } },
-      required: ['name'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.update_canvas),
   },
   {
     name: 'create_canvas_page',
     description:
       'Add a new, empty page at the end of this canvas and get its id back. Use a page when a body of work deserves its own board (a second product surface, web vs. mobile, a round of explorations) and a frame when it is one screen. Move frames onto it with update_frame, or reorder it with set_canvas_pages.',
-    input_schema: {
-      type: 'object',
-      properties: { name: { type: 'string', description: 'The page name shown in the Pages panel' } },
-      required: ['name'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.create_canvas_page),
   },
   {
     name: 'set_canvas_pages',
     description:
       'Rename, reorder or delete pages by sending the complete ordered page list. expectedPages is the list as you last saw it (the kickoff, or the last page tool result); if a collaborator changed it since, the call is refused with the current list. A page that still holds frames cannot be deleted: move its frames with update_frame first. To add a page, use create_canvas_page.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        expectedPages: {
-          type: 'array',
-          description: 'The ordered pages as you last saw them',
-          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
-        },
-        pages: {
-          type: 'array',
-          description: 'The new ordered list; keep each page id, change names and order, leave out a page to delete it',
-          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
-        },
-      },
-      required: ['expectedPages', 'pages'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_canvas_pages),
   },
   {
     name: 'get_prototype',
     description:
       'List the clickable-prototype wiring of this canvas: each page with its flow start frame, and every interaction (data-doop-on / data-doop-action attributes in frame HTML) with its trigger, action and target. Interactions whose target frame does not exist carry a problem; fix them with edit_frame_html. Call it after wiring a flow.',
-    input_schema: { type: 'object', properties: {} },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.get_prototype),
   },
   {
     name: 'set_prototype_start',
     description:
-      "Choose the frame a page's clickable prototype starts on (the player at /c/<canvas>/proto opens there). Pass an empty frame_id to clear it; the flow then starts on the page's top-left frame.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        frame_id: { type: 'string', description: "The start frame, or an empty string to clear the page's start" },
-        page_id: {
-          type: 'string',
-          description: "The page; defaults to the start frame's page (the first page when clearing)",
-        },
-      },
-      required: ['frame_id'],
-    },
+      "Choose the frame a page's clickable prototype starts on (the player at /c/<canvas>/proto opens there). Pass null as frame_id to clear it; the flow then starts on the page's top-left frame.",
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.set_prototype_start),
   },
   {
     name: 'screenshot_frame',
@@ -1938,18 +1739,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: 'export_layer',
     description:
       "Export ONE element (layer) of a frame as a PNG or JPG: the frame rendered whole, cut to that element's box. Returns public URLs that re-render when the frame changes. Name the element by element_id (its data-doop-id) or, when it has none, by selector (any CSS selector; the first match is used).",
-    input_schema: {
-      type: 'object',
-      properties: {
-        frame_id: { type: 'string' },
-        element_id: { type: 'string', description: "the element's data-doop-id" },
-        selector: { type: 'string', description: 'a CSS selector, for an element without a data-doop-id' },
-        format: { type: 'string', enum: ['png', 'jpg'] },
-        quality: { type: 'number', minimum: 1, maximum: 100 },
-        scale: { type: 'number', minimum: MIN_EXPORT_SCALE, maximum: MAX_EXPORT_SCALE },
-      },
-      required: ['frame_id'],
-    },
+    input_schema: jsonSchemaOf(SHARED_PARAMETERS.export_layer),
   },
 ]
 
@@ -1958,16 +1748,55 @@ for (const tool of COMPONENT_TOOLS) {
   TOOLS.push({
     name: tool.name,
     description: tool.description,
-    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+    input_schema: jsonSchemaOf(residentParameters(tool.shape)),
   })
 }
 TOOLS.push({
   name: 'screenshot_component',
   description: previewDescription,
-  input_schema: zodToJsonSchema(
-    z.object({ component: z.string(), props: previewProps }),
-  ) as Anthropic.Tool['input_schema'],
+  input_schema: jsonSchemaOf(SCREENSHOT_COMPONENT_PARAMETERS),
 })
+
+/** What a call is checked against, by tool, keeping the parameters it does not list (a tool's old spellings, below)
+ *  for its handler. The resident-only tools with a hand-written schema have none. */
+const TOOL_PARAMETERS = new Map<string, z.AnyZodObject>(
+  [
+    ...Object.entries(SHARED_PARAMETERS),
+    ...COMPONENT_TOOLS.map((tool) => [tool.name, residentParameters(tool.shape)] as const),
+    ['screenshot_component', SCREENSHOT_COMPONENT_PARAMETERS] as const,
+  ].map(([name, parameters]) => [name, parameters.passthrough()]),
+)
+
+/** A tool's parameter names before it took MCP's: a model copying an earlier call keeps working. */
+const OLD_SPELLINGS: Partial<Record<string, Record<string, string>>> = {
+  edit_frame_html: { find: 'old_str', replace: 'new_str' },
+  set_prototype_start: { page_id: 'pageId' },
+}
+
+/**
+ * A call's input checked against the parameters its model was shown, as an MCP call is before its handler runs:
+ * refused with what is wrong, or handed on as the check made it (text trimmed, defaults filled in). An optional
+ * parameter given as null counts as not given, as the handlers read it before they were checked.
+ */
+function checkedInput(name: string, input: unknown): { ok: true; input: unknown } | { ok: false; error: string } {
+  const parameters = TOOL_PARAMETERS.get(name)
+  if (!parameters) return { ok: true, input }
+  const given: Record<string, unknown> = { ...(typeof input === 'object' && input !== null ? input : {}) }
+  for (const [old, current] of Object.entries(OLD_SPELLINGS[name] ?? {}))
+    if (old in given && given[current] == null) {
+      given[current] = given[old]
+      delete given[old]
+    }
+  const shape: z.ZodRawShape = parameters.shape
+  for (const [key, value] of Object.entries(given)) {
+    const field = shape[key]
+    if (value === null && field?.isOptional() && !field.isNullable()) delete given[key]
+  }
+  const checked = parameters.safeParse(given)
+  if (checked.success) return { ok: true, input: checked.data }
+  const issues = checked.error.issues.map((issue) => `${issue.path.join('.') || 'input'}: ${issue.message}`)
+  return { ok: false, error: `Invalid arguments for ${name}: ${issues.join('; ')}` }
+}
 
 function canReadCanvas(userId: string, canvasId: string): boolean {
   const other = store.getCanvas(canvasId)
@@ -2045,11 +1874,13 @@ async function frameImageBlocks(
 
 /** Runs one tool call of the resident's loop. Exported for tests. */
 export async function execTool(
-  block: Anthropic.ToolUseBlockParam,
+  given: Anthropic.ToolUseBlockParam,
   canvasId: string,
   actor: ReturnType<typeof actions.resolveActor>,
   runState: RunState,
 ): Promise<Anthropic.ToolResultBlockParam> {
+  const checked = checkedInput(given.name, given.input)
+  const block = checked.ok ? { ...given, input: checked.input } : given
   const input = block.input as { frame_id: string } & Record<string, string>
   const fail = (msg: string): Anthropic.ToolResultBlockParam => ({
     type: 'tool_result',
@@ -2065,9 +1896,11 @@ export async function execTool(
 
   const toCheckBefore = uncheckedKey(uncheckedChanges(runState, canvasId))
   /* one tool call is one operation, as over MCP: a work budget of its own (server/workBudget.ts) */
-  const answered = await runOperation(`resident ${block.name}`, canvasId, () =>
-    runResidentTool(canvasId, block, actor, runState, input, ok, fail),
-  )
+  const answered = !checked.ok
+    ? fail(checked.error)
+    : await runOperation(`resident ${block.name}`, canvasId, () =>
+        runResidentTool(canvasId, block, actor, runState, input, ok, fail),
+      )
   /* a call that changed what is left to look at says what is left: the desktop harness
      has no turn of its own to be reminded in */
   return !answered.is_error && uncheckedKey(uncheckedChanges(runState, canvasId)) !== toCheckBefore
@@ -2119,10 +1952,16 @@ async function runResidentTool(
           html?: string
           x?: number
           y?: number
+          pageId?: unknown
           fit_to_content?: unknown
         }
         const fitAxes = readFitAxes(raw.fit_to_content)
         if (!fitAxes.ok) return fail(fitAxes.error)
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const pageId = typeof raw.pageId === 'string' && raw.pageId.trim() ? raw.pageId.trim() : undefined
+        if (pageId && !canvasPages(canvas).some((page) => page.id === pageId))
+          return fail(frameMetaError({ unknownPage: pageId }, canvas))
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
         /* the inline-data guidance before the size refusal, as this tool always answered: the
@@ -2134,7 +1973,7 @@ async function runResidentTool(
         }
         const created = await runCanvasWrite(canvasId, {
           type: 'create-frame',
-          input: createFrameInput({ ...raw, html }, runState.placement, store.getCanvas(canvasId)),
+          input: createFrameInput({ ...raw, html, pageId }, runState.placement, canvas),
           actor,
           inline: 'resident',
         })
@@ -2207,24 +2046,26 @@ async function runResidentTool(
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
-        if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
-        if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
+        const find = input.old_str
+        const replace = input.new_str
+        if (typeof find !== 'string' || !find) return fail('old_str must be a non-empty exact HTML string')
+        if (typeof replace !== 'string') return fail('new_str must be an HTML string')
         /* matched in the form get_frame_html showed, or the stored or composed one if that is
            what was copied, and checked for inline data the frame did not hold, where the
            frame's writes are run (server/canvasWrites.ts) */
         const edited = await runCanvasWrite(canvasId, {
           type: 'edit-frame-html',
           frameId: input.frame_id,
-          find: input.find,
-          replace: input.replace,
+          find,
+          replace,
           actor,
           inline: 'resident',
         })
         if (!edited.ok) {
           if ('missing' in edited) return fail('frame not found on this canvas')
-          if ('unbalanced' in edited) return fail(unbalancedProblem(edited.unbalanced, '"find" text', '"replace" text'))
+          if ('unbalanced' in edited) return fail(unbalancedProblem(edited.unbalanced, 'old_str', 'new_str'))
           return fail(
-            'inline' in edited ? edited.inline : frameEditProblem(edited.problem, '"find" text', 'get_frame_html'),
+            'inline' in edited ? edited.inline : frameEditProblem(edited.problem, 'old_str', 'get_frame_html'),
           )
         }
         noteFrameChange(runState, input.frame_id)
@@ -2709,14 +2550,18 @@ async function runResidentTool(
         )
       }
       case 'get_tokens': {
-        const raw = block.input as { types?: unknown; format?: unknown }
+        const raw = block.input as { types?: unknown; name_pattern?: unknown; format?: unknown }
         const types = Array.isArray(raw.types) ? raw.types.filter((t): t is string => typeof t === 'string') : []
-        let tokens = store.getTokens(canvasId)
+        const all = store.getTokens(canvasId)
+        let tokens = all
         const themes = store.getTokenThemes(canvasId)
         if (types.length) tokens = tokens.filter((t) => types.includes(t.type))
-        if (!tokens.length) return ok('no design tokens on this canvas yet — add some with create_tokens')
+        if (typeof raw.name_pattern === 'string' && raw.name_pattern) tokens = tokensNamed(tokens, raw.name_pattern)
+        if (!all.length) return ok('no design tokens on this canvas yet — add some with create_tokens')
+        if (!tokens.length) return ok('no design tokens match that filter')
         if (raw.format === 'css') return ok(tokensCss(tokens, themes))
         if (raw.format === 'tailwind') return ok(tokensTailwind(tokens, themes))
+        if (raw.format === 'markdown') return ok(tokensMarkdown(tokens, themes))
         return ok(JSON.stringify({ tokens: describeTokens(tokens), ...(themes.length ? { themes } : {}) }))
       }
       case 'create_tokens': {
@@ -2782,9 +2627,16 @@ async function runResidentTool(
         if (!fitAxes.ok) return fail(fitAxes.error)
         /* the store updates the frame object in place, so what it was is read first */
         const arrangement = (frame: typeof f) =>
-          [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
-            '\u0000',
-          )
+          [
+            frame.name,
+            framePageId(canvas, frame),
+            frame.x,
+            frame.y,
+            frame.width,
+            frame.height,
+            !!frame.locked,
+            frame.rotation ?? 0,
+          ].join('\u0000')
         const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
         const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -2799,6 +2651,7 @@ async function runResidentTool(
             width: num(raw.width),
             height: num(raw.height),
             locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
+            rotation: num(raw.rotation),
           },
           fitAxes.value,
           actor,
@@ -2812,62 +2665,8 @@ async function runResidentTool(
         /* a save that changed nothing has not delivered anything */
         if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
         return ok(
-          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}${note ? `\n${note}` : ''}`,
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.rotation ? `, turned ${frame.rotation}°` : ''}${frame.locked ? ', locked' : ''}${note ? `\n${note}` : ''}`,
         )
-      }
-      case 'update_canvas': {
-        const name = typeof input.name === 'string' ? input.name.trim() : ''
-        if (!name || name.length > MAX_CANVAS_NAME) return fail(`name must be 1-${MAX_CANVAS_NAME} characters`)
-        const before = store.getCanvas(canvasId)?.name
-        const canvas = actions.renameCanvas(canvasId, name, actor)
-        if (!canvas) return fail('canvas not found')
-        if (canvas.name !== before) runState.arrangeWrites += 1
-        return ok(JSON.stringify({ name: canvas.name }))
-      }
-      case 'create_canvas_page': {
-        const name = typeof input.name === 'string' ? input.name.trim() : ''
-        if (!name || name.length > MAX_PAGE_NAME) return fail(`name must be 1-${MAX_PAGE_NAME} characters`)
-        const created = addPage(canvasId, name, actor)
-        if (!created.ok) return fail(created.error)
-        runState.arrangeWrites += 1
-        return ok(
-          JSON.stringify({
-            page: created.value.page,
-            pages: created.value.pages.map(({ id, name }) => ({ id, name })),
-          }),
-        )
-      }
-      case 'set_canvas_pages': {
-        const canvas = store.getCanvas(canvasId)
-        if (!canvas) return fail('canvas not found')
-        const raw = block.input as { expectedPages?: unknown; pages?: unknown }
-        const pages = parsePageList(raw.pages)
-        if (typeof pages === 'string') return fail(pages)
-        const previous = pageList(canvas)
-        const saved = savePages(canvas, raw.expectedPages, pages, actor)
-        if (!saved.ok) return fail(saved.error)
-        if (!samePages(previous, saved.value)) runState.arrangeWrites += 1
-        return ok(JSON.stringify({ pages: saved.value.map(({ id, name }) => ({ id, name })) }))
-      }
-      case 'get_prototype': {
-        const canvas = store.getCanvas(canvasId)
-        if (!canvas) return fail('canvas not found')
-        return ok(JSON.stringify(prototypeReport(canvas)))
-      }
-      case 'set_prototype_start': {
-        const raw = block.input as { frame_id?: unknown; page_id?: unknown }
-        if (typeof raw.frame_id !== 'string') return fail('frame_id must be a frame id, or an empty string to clear')
-        const canvas = store.getCanvas(canvasId)
-        if (!canvas) return fail('canvas not found')
-        const pageId = typeof raw.page_id === 'string' && raw.page_id ? raw.page_id : undefined
-        const frameId = raw.frame_id.trim() || null
-        const result = setPrototypeStart(canvas, pageId, frameId, actor)
-        if (!result.ok) return fail(result.error)
-        captureFeature(runState.requesterId, 'prototype_start_set', 'resident', {
-          canvas_id: canvasId,
-          cleared: frameId === null,
-        })
-        return ok(JSON.stringify({ pages: result.pages }))
       }
       case 'export_layer': {
         const raw = block.input as {
@@ -2921,6 +2720,20 @@ async function runResidentTool(
         }
       }
       default: {
+        const shared = sharedToolHandler(block.name)
+        if (shared) {
+          const canvas = store.getCanvas(canvasId)
+          if (!canvas) return fail('canvas not found')
+          const outcome = shared.run(block.input as Record<string, unknown>, {
+            canvas,
+            actor,
+            userId: runState.requesterId,
+            surface: 'resident',
+          })
+          if (!outcome.ok) return fail(outcome.error)
+          if (outcome.arranged) runState.arrangeWrites += 1
+          return ok(JSON.stringify(outcome.data))
+        }
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')

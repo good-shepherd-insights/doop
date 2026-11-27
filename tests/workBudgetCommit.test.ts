@@ -627,12 +627,18 @@ const OPERATIONS: Record<string, Case> = {
     run: ({ canvas }) =>
       resident(
         'create_frame',
-        { name: 'Hero', html: doc('<doop-use component="Button"></doop-use><doop-use component="Badge"></doop-use>') },
+        {
+          name: 'Hero',
+          html: doc('<doop-use component="Button"></doop-use><doop-use component="Badge"></doop-use>'),
+          width: 640,
+          height: 480,
+        },
         canvas,
       ),
   },
   'resident edit_frame_html': {
-    run: ({ canvas, page }) => resident('edit_frame_html', { frame_id: page.id, find: 'One', replace: 'Uno' }, canvas),
+    run: ({ canvas, page }) =>
+      resident('edit_frame_html', { frame_id: page.id, old_str: 'One', new_str: 'Uno' }, canvas),
   },
   'resident set_frame_html of a main': {
     run: ({ canvas, mainFrame }) =>
